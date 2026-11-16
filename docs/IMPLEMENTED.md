@@ -6,6 +6,45 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Alta de conexiones por herramienta y probe desde la instalación vacía — 16/11
+
+Custodia ya no depende de `add-http-lab` para incorporar una fuente. El registro
+`server/internal/connectors` declara qué herramientas están implementadas
+(CyberArk PAM; inventario HTTP sintético) y cuáles son sólo hoja de ruta
+(Netskope, QRadar, Palo Alto, FortiGate, CrowdStrike, Tenable). Un conector
+planificado no declara endpoints, colecciones ni credenciales, y el alta lo
+rechaza: no se inventan contratos por herramienta.
+
+La migración aditiva 7 agrega a `lab_sync_sources` el modo de auth y las
+referencias `env:`/`file:`/`secret:` (bearer, OAuth client-credentials, mTLS),
+la CA y el par cliente. Las migraciones 1–6 no se tocaron; las conexiones
+existentes quedan con `auth_mode=none` y el mismo comportamiento de fixture.
+
+API administrativa:
+
+- `GET /api/ingestion/connectors`: catálogo de descriptores.
+- `POST /api/ingestion/connections`: alta sin contactar el tenant; exige
+  administrador, HTTPS con path opcional, par conector/colección válido y
+  referencias de credencial válidas; audita `connection_register` y concede
+  lectura/`can_run` al creador. La respuesta no repite las referencias.
+- `POST /api/ingestion/connections/{id}/probe`: ejecuta el mismo plan del probe
+  sobre los endpoints de esa colección, devuelve el reporte saneado y audita
+  `connection_probe`. No publica observaciones ni encola corridas.
+
+El adaptador CyberArk acepta ahora un tenant HTTPS con prefijo de path y un
+cliente autenticado provisto por `probe.Prepare`; el fixture loopback conserva
+su ruta sin credenciales. Una conexión registrada se recolecta con el worker
+normal: el probe, la corrida y el adaptador comparten origen, CA, auth y
+límites.
+
+Verificación: `TestRegistrySeparatesImplementedFromPlanned`,
+`TestTenantOnboardingProbeAndCollection` (alta → probe → corrida → registros
+sobre TLS), `TestTenantOnboardingRejectsUnsafeConfiguration`,
+`TestTenantProbeFailsWhenCredentialSourceIsAbsent`,
+`TestRemoteTenantHTTPSWithPathPrefix` y
+`TestRemoteTenantRejectsUnsafeBase`, entre otras. Límites: no se contactó un
+tenant real; Netskope y las demás herramientas siguen sin contrato Go.
+
 ## Backup/restore SQLite y paquete autohospedado — 16/11
 
 Se agregó `server/internal/sqlitebackup` y los comandos `backup`/`restore`.

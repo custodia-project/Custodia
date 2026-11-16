@@ -45,11 +45,22 @@ func TestNewPlanRequiresAuthorizationAndCredentialReference(t *testing.T) {
 	}
 }
 
+func TestNewPlanAcceptsTenantPathPrefix(t *testing.T) {
+	config := validConfig()
+	config.BaseURL = "https://pam.acme.example/PasswordVault/"
+	plan, err := NewPlan(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.BaseURL != "https://pam.acme.example/PasswordVault/" {
+		t.Fatal(plan.BaseURL)
+	}
+}
+
 func TestNewPlanRequiresTLSWithoutUserInfoQueryOrPath(t *testing.T) {
 	for _, base := range []string{
 		"http://pam.acme.example",
 		"https://user:pass@pam.acme.example",
-		"https://pam.acme.example/pvwa",
 		"https://pam.acme.example?x=1",
 		"https://pam.acme.example#fragment",
 		"https://",

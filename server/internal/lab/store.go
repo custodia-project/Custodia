@@ -119,6 +119,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = migrateScheduling(ctx, tx); err != nil {
 		return err
 	}
+	if err = migrateConnections(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

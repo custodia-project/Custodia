@@ -1,0 +1,219 @@
+// Package connectors is the static registry of source tools Custodia can
+// onboard. A descriptor states only what is implemented and verified: planned
+// tools carry no endpoints, collections or credentials contract, so a
+// connection cannot be created for them by guessing.
+package connectors
+
+import (
+	"sort"
+	"strings"
+)
+
+// Descriptor describes one source tool and the connection fields it accepts.
+type Descriptor struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Vendor         string   `json:"vendor"`
+	Category       string   `json:"category"`
+	Status         string   `json:"status"`
+	AuthModes      []string `json:"auth_modes"`
+	Collections    []string `json:"collections"`
+	ProbeEndpoints []string `json:"probe_endpoints"`
+	Notes          string   `json:"notes"`
+}
+
+const (
+	StatusAvailable  = "available"
+	StatusLaboratory = "laboratory"
+	StatusPlanned    = "planned"
+)
+
+// CyberArkPAM is the implemented read-only PAM connector.
+const CyberArkPAM = "cyberark-pam-safes-v1"
+
+// HTTPInventory is the synthetic normalized connector used by the laboratory
+// and the browser gate. It is not a vendor connector.
+const HTTPInventory = "http-inventory-v1"
+
+var cyberArkCollections = []string{
+	"safes", "safe_members", "accounts", "platforms",
+	"psm_servers", "psm_connectors", "platform_psm_links",
+}
+
+var cyberArkEndpoints = []string{
+	"/API/Accounts", "/API/Platforms", "/API/PSM/Connectors", "/API/PSM/Servers", "/API/Safes",
+}
+
+var registry = []Descriptor{
+	{
+		ID:       CyberArkPAM,
+		Name:     "CyberArk PAM",
+		Vendor:   "CyberArk",
+		Category: "PAM",
+		Status:   StatusAvailable,
+		AuthModes: []string{
+			"bearer", "oauth-client-credentials", "mtls",
+		},
+		Collections:    cyberArkCollections,
+		ProbeEndpoints: cyberArkEndpoints,
+		Notes:          "Read-only Safes, members, non-secret account metadata, platforms and the PSM catalogs. No secret retrieval, sessions or account passwords.",
+	},
+	{
+		ID:       HTTPInventory,
+		Name:     "Normalized HTTP inventory",
+		Vendor:   "Custodia",
+		Category: "laboratory",
+		Status:   StatusLaboratory,
+		AuthModes: []string{
+			"none",
+		},
+		Collections:    []string{"users", "devices"},
+		ProbeEndpoints: nil,
+		Notes:          "Synthetic loopback contract for tests and the local browser gate. Not a vendor connector and not for tenant onboarding.",
+	},
+	{
+		ID:       "netskope",
+		Name:     "Netskope",
+		Vendor:   "Netskope",
+		Category: "SSE",
+		Status:   StatusPlanned,
+		Notes:    "The DS Hub contract exists, but no Go adapter is implemented or accepted. Planned status does not authorize endpoints or credentials.",
+	},
+	{
+		ID:       "qradar",
+		Name:     "IBM QRadar",
+		Vendor:   "IBM",
+		Category: "SIEM",
+		Status:   StatusPlanned,
+		Notes:    "No Custodia contract. Endpoints, auth and collections must be approved before a connection can be created.",
+	},
+	{
+		ID:       "paloalto",
+		Name:     "Palo Alto Networks",
+		Vendor:   "Palo Alto Networks",
+		Category: "Network security",
+		Status:   StatusPlanned,
+		Notes:    "No Custodia contract. Firewall or Panorama scope must be decided per tenant before implementation.",
+	},
+	{
+		ID:       "fortigate",
+		Name:     "FortiGate",
+		Vendor:   "Fortinet",
+		Category: "Network security",
+		Status:   StatusPlanned,
+		Notes:    "No Custodia contract. FortiGate and FortiManager expose different APIs and neither is approved yet.",
+	},
+	{
+		ID:       "crowdstrike",
+		Name:     "CrowdStrike Falcon",
+		Vendor:   "CrowdStrike",
+		Category: "EDR",
+		Status:   StatusPlanned,
+		Notes:    "No Custodia contract in this backend. Planned status carries no endpoint or scope claim.",
+	},
+	{
+		ID:       "tenable",
+		Name:     "Tenable",
+		Vendor:   "Tenable",
+		Category: "Vulnerability management",
+		Status:   StatusPlanned,
+		Notes:    "No Custodia contract. Asset and vulnerability scopes must be approved before onboarding.",
+	},
+}
+
+// List returns the registry ordered by category then name. Planned tools are
+// included so an operator can see the roadmap, but they are not connectable.
+func List() []Descriptor {
+	result := make([]Descriptor, len(registry))
+	copy(result, registry)
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Category != result[j].Category {
+			return result[i].Category < result[j].Category
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// Get returns one descriptor by ID.
+func Get(id string) (Descriptor, bool) {
+	for _, descriptor := range registry {
+		if descriptor.ID == id {
+			return descriptor, true
+		}
+	}
+	return Descriptor{}, false
+}
+
+// Connectable reports whether a connection may be created for this connector.
+func Connectable(descriptor Descriptor) bool {
+	return descriptor.Status == StatusAvailable || descriptor.Status == StatusLaboratory
+}
+
+// SupportsCollection reports whether the descriptor declares the collection.
+func SupportsCollection(descriptor Descriptor, collection string) bool {
+	for _, candidate := range descriptor.Collections {
+		if candidate == collection {
+			return true
+		}
+	}
+	return false
+}
+
+// SupportsAuthMode reports whether the descriptor declares the auth mode.
+// The synthetic connector authenticates with no credential and declares none.
+func SupportsAuthMode(descriptor Descriptor, mode string) bool {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = "none"
+	}
+	for _, candidate := range descriptor.AuthModes {
+		if candidate == mode {
+			return true
+		}
+	}
+	return false
+}
+
+// ProbeEndpointsFor returns the read-only endpoints a probe needs for one
+// collection, so a tenant is not asked for permissions it does not use.
+func ProbeEndpointsFor(descriptor Descriptor, collection string) []string {
+	if descriptor.ID == CyberArkPAM {
+		switch collection {
+		case "safes", "safe_members":
+			return []string{"/API/Safes"}
+		case "accounts":
+			return []string{"/API/Accounts"}
+		case "platforms":
+			return []string{"/API/Platforms"}
+		case "psm_servers":
+			return []string{"/API/PSM/Servers"}
+		case "psm_connectors":
+			return []string{"/API/PSM/Connectors"}
+		case "platform_psm_links":
+			return []string{"/API/Platforms", "/API/PSM/Servers"}
+		}
+	}
+	return descriptor.ProbeEndpoints
+}
+
+// CollectionNames returns every implemented collection across available
+// connectors, for configuration checks.
+func CollectionNames() []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, descriptor := range registry {
+		if !Connectable(descriptor) {
+			continue
+		}
+		for _, collection := range descriptor.Collections {
+			if seen[collection] {
+				continue
+			}
+			seen[collection] = true
+			result = append(result, collection)
+		}
+	}
+	sort.Strings(result)
+	return result
+}

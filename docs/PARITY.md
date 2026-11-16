@@ -73,10 +73,10 @@ Las pruebas incluyen IDs iguales en dos conexiones del mismo proveedor y en
 dos colecciones, fuentes parciales/ausentes, pares sin regla, búsqueda/ficha/
 porcentajes sin filtraciones, revocación inmediata y rollback de concesiones
 o revocación ante una auditoría fallida. Queda por integrar la identidad real,
-la administración de conexiones/reglas y las observaciones remotas de
+la pantalla de alta de conexiones/reglas y las observaciones remotas de
 proveedores. El primer tramo de sincronización de laboratorio se detalla
-abajo; conectores reales, worker asíncrono, backup/restore y distribución
-siguen pendientes en [el tracker](TO_IMPLEMENT.md).
+abajo; el alta por API existe, pero conectores reales aceptados, backup/restore
+y distribución siguen pendientes en [el tracker](TO_IMPLEMENT.md).
 
 ## Primera sincronización de inventario — 16/11
 
@@ -292,17 +292,20 @@ logs operativos ni tabla de etapas; esa telemetría sigue pendiente.
 - Una colección por conexión y una corrida activa por conexión. Python usa
   `task_key` y permite tareas hermanas de una fuente; esa separación queda para
   el próximo tramo.
-- Sin conector real, sin secretos, sin TLS, sin probe ni administración de
-  conexiones por API. Los dos adaptadores son de lectura y sólo aceptan un
-  origen HTTP numérico de loopback; el de Safes PAM usa el contrato CyberArk
-  contra un fixture, no contra un tenant.
+- El alta y el probe ya existen por API para un administrador: catálogo de
+  conectores con estado, conexión HTTPS con path opcional, referencias de
+  credencial y auditoría. Un conector `planned` no declara contrato y no se
+  puede conectar. El probe y la corrida comparten plan, CA, auth y límites.
+- Sin proveedor real aceptado: CyberArk PAM se ejercitó contra fixtures
+  loopback y HTTPS locales, no contra un tenant. Netskope, QRadar, Palo Alto,
+  FortiGate, CrowdStrike y Tenable siguen planificados, sin endpoints ni
+  credenciales inventadas.
 - La UI de sync ya inicia, consulta y agenda con los contratos anteriores:
   `ingestion:run` se anuncia, `/all/runs` encola, la agenda se edita y las
   etapas por fuente se consultan. `scope=cyberark` aísla las conexiones PAM.
-  Siguen sin migrar las revisiones humanas por HTTP, la administración de
-  conexiones, el probe y los proveedores reales. La agenda usa timestamps
-  RFC3339 de segundo; el orden de dos corridas del mismo segundo no es
-  significativo.
+  La pantalla de alta de conexiones y las revisiones humanas por HTTP siguen
+  sin migrar. La agenda usa timestamps RFC3339 de segundo; el orden de dos
+  corridas del mismo segundo no es significativo.
 - Sin relaciones entre objetos ni grafo CMDB; esta primera entrega sólo
   persiste observaciones de una colección y sus bajas por ausencia. La
   publicación carga las observaciones existentes de esa conexión/colección en

@@ -33,7 +33,7 @@ configurado.
 
 | Campo | Regla |
 |---|---|
-| `BaseURL` | `https://`, absoluta, sin usuario, query, fragmento ni path. |
+| `BaseURL` | `https://` absoluta, sin usuario, query ni fragmento; admite prefijo de path (`/PasswordVault`). |
 | `Authorized` | Debe ser `true`; representa autorización explícita del dueño. |
 | `AuthMode` | `bearer`, `oauth-client-credentials` o `mtls`. |
 | `CredentialRef` | Bearer: referencia `env:`, `file:` o `secret:`; nunca un valor. |
@@ -73,7 +73,9 @@ no contactan ningún tenant.
 
 ## Comando
 
-El comando ya está cableado y emite el reporte saneado como JSON:
+El comando ya está cableado y emite el reporte saneado como JSON. Es el mismo
+plan que usa `POST /api/ingestion/connections/{id}/probe`: el alta y el probe
+por API comparten validación, transporte y límites.
 
 ```sh
 # Bearer

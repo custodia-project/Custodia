@@ -10,8 +10,9 @@ revisado: 2026-11-16
 contra servidores HTTP locales sintéticos: el contrato normalizado
 `http-inventory-v1` y el contrato CyberArk PAM `cyberark-pam-safes-v1`
 (colecciones `safes`, `safe_members`, `accounts`, `platforms`, `psm_servers`,
-`psm_connectors` y `platform_psm_links`). No hay credenciales, TLS, probe ni
-API administrativa de conexiones; ningún adaptador acredita un tenant real.
+`psm_connectors` y `platform_psm_links`). El alta de conexiones y el probe por
+API ya existen para un administrador; las herramientas planificadas no tienen
+contrato y no se pueden conectar. Ningún adaptador acredita un tenant real.
 Objetivo: agregar una herramienta sin modificar el núcleo ni obligar al
 operador a conocer sus endpoints. No es posible generalizar los significados
 de todas las APIs con un formulario URL + token.
@@ -53,10 +54,61 @@ las interfaces Go exactas junto con su primer consumidor y prueba.
 5. Ejecutar primera sincronización; ver filas observadas, descartes y errores.
 6. Consultar última ejecución completa y cambios; reintentar sin duplicar.
 
+Custodia se instala vacía: no hay fuentes ni credenciales por defecto. El
+operador elige la herramienta, pega la URL del tenant y una referencia de
+credencial, prueba el acceso y recién después recolecta. Un tenant pertenece a
+la instalación del operador; Custodia no es un servicio multiinquilino central.
+
 Capacidades de inventario, métricas agregadas, detalle sensible y catálogo
 en vivo son distintas. Una conexión puede servir sólo algunas. Una vista
 sólo se ofrece si su capacidad y permiso están disponibles. Un catálogo
 consultado en vivo no se presenta como snapshot histórico.
+
+## Alta de conexiones y catálogo
+
+`GET /api/ingestion/connectors` publica el registro estático. Cada descriptor
+declara estado, modos de autenticación, colecciones y endpoints de probe. Un
+conector `planned` (Netskope, QRadar, Palo Alto, FortiGate, CrowdStrike,
+Tenable) no declara endpoints, colecciones ni credenciales: es una opción de
+hoja de ruta, no un contrato, y el alta lo rechaza. Esto evita inventar API o
+pedir permisos por una herramienta que todavía no se implementó.
+
+Un administrador conecta un tenant sin tocar el host:
+
+```sh
+POST /api/ingestion/connections
+{
+  "connector": "cyberark-pam-safes-v1",
+  "base_url": "https://pvwa.empresa.example/PasswordVault",
+  "collection": "safes",
+  "scope": "pam-safes-prod",
+  "auth_mode": "oauth-client-credentials",
+  "token_url": "https://pvwa.empresa.example/oauth2/platformtoken",
+  "client_id_ref": "env:CUSTODIA_PAM_CLIENT_ID",
+  "client_secret_ref": "secret:pam-client-secret",
+  "scopes": ["pam.read"],
+  "ca_file": "/etc/custodia/empresa-ca.pem"
+}
+```
+
+Reglas del alta:
+
+- Sólo un administrador puede crear o probar una conexión.
+- La URL de un conector implementado debe ser HTTPS, sin usuario, query ni
+  fragmento; se admite un prefijo de path (por ejemplo `/PasswordVault`).
+- La credencial es siempre una referencia `env:`, `file:` o `secret:`; el alta
+  rechaza valores literales y nunca contacta el tenant.
+- El par conector/colección y el modo de auth deben existir en el descriptor.
+- El creador recibe lectura y `can_run` para esa conexión, y el alta queda en
+  auditoría (`connection_register`).
+- La respuesta no repite la referencia de credencial: sólo indica si está
+  configurada.
+
+`POST /api/ingestion/connections/{id}/probe` ejecuta el mismo plan validado del
+probe sobre los endpoints que esa colección necesita, devuelve un reporte
+saneado y audita `connection_probe`. Un probe con fallos se informa endpoint
+por endpoint; no publica observaciones ni encola una corrida.
+
 
 ## Estados y reconciliación
 

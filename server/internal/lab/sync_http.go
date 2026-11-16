@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"custodia/server/internal/connectors"
 )
 
 // serveSyncAPI is the HTTP boundary for the first read-only synchronization.
@@ -24,6 +26,92 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 	fail := func(code int, detail string) { send(code, map[string]string{"detail": detail}) }
 	path := strings.TrimPrefix(r.URL.Path, "/api/ingestion/")
 	switch {
+	case path == "connectors":
+		if r.Method != "GET" {
+			fail(405, "Catálogo de sólo lectura.")
+			return true
+		}
+		send(200, map[string]any{"rows": connectors.List()})
+		return true
+	case path == "connections":
+		if r.Method != "POST" {
+			fail(405, "Alta de conexiones por POST.")
+			return true
+		}
+		if !s.IsAdministrator(r.Context(), principal) {
+			fail(403, "Sólo un administrador puede conectar un tenant.")
+			return true
+		}
+		var input struct {
+			Connector       string   `json:"connector"`
+			BaseURL         string   `json:"base_url"`
+			Collection      string   `json:"collection"`
+			Scope           string   `json:"scope"`
+			Generation      string   `json:"generation"`
+			AuthMode        string   `json:"auth_mode"`
+			CredentialRef   string   `json:"credential_ref"`
+			TokenURL        string   `json:"token_url"`
+			ClientIDRef     string   `json:"client_id_ref"`
+			ClientSecretRef string   `json:"client_secret_ref"`
+			Scopes          []string `json:"scopes"`
+			CAFile          string   `json:"ca_file"`
+			ClientCertFile  string   `json:"client_cert_file"`
+			ClientKeyFile   string   `json:"client_key_file"`
+			PageSize        int      `json:"page_size"`
+			MaxPages        int      `json:"max_pages"`
+			MaxRecords      int      `json:"max_records"`
+			Interval        int      `json:"interval_minutes"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			fail(400, "Configuración de conexión inválida.")
+			return true
+		}
+		source, err := s.RegisterConnection(r.Context(), principal.Actor(), principal, SyncSource{
+			Connector: input.Connector, BaseURL: input.BaseURL, Collection: input.Collection,
+			Scope: input.Scope, Generation: input.Generation, AuthMode: input.AuthMode,
+			CredentialRef: input.CredentialRef, TokenURL: input.TokenURL,
+			ClientIDRef: input.ClientIDRef, ClientSecretRef: input.ClientSecretRef,
+			Scopes: input.Scopes, CAFile: input.CAFile,
+			ClientCertFile: input.ClientCertFile, ClientKeyFile: input.ClientKeyFile,
+			PageSize: input.PageSize, MaxPages: input.MaxPages, MaxRecords: input.MaxRecords,
+			Interval: input.Interval,
+		}, current)
+		if err != nil {
+			if errors.Is(err, ErrDenied) {
+				fail(403, "Sólo un administrador puede conectar un tenant.")
+			} else {
+				fail(400, "No se pudo registrar la conexión: "+safeConfigurationError(err))
+			}
+			return true
+		}
+		send(201, syncSourceJSON(source))
+		return true
+	case strings.HasPrefix(path, "connections/") && strings.HasSuffix(path, "/probe"):
+		if r.Method != "POST" {
+			fail(405, "Probe de conexiones por POST.")
+			return true
+		}
+		connectionID := strings.TrimSuffix(strings.TrimPrefix(path, "connections/"), "/probe")
+		if connectionID == "" || strings.Contains(connectionID, "/") {
+			fail(404, "Conexión no encontrada.")
+			return true
+		}
+		report, err := s.ProbeConnection(r.Context(), principal, connectionID, current)
+		if err != nil {
+			switch {
+			case errors.Is(err, ErrDenied):
+				fail(403, "Sólo un administrador puede probar la conexión.")
+			case errors.Is(err, ErrSyncNotFound):
+				fail(404, "Conexión no encontrada.")
+			default:
+				fail(400, "No se pudo probar la conexión: "+safeConfigurationError(err))
+			}
+			return true
+		}
+		send(200, map[string]any{"connection_id": connectionID, "report": report, "failed_endpoints": report.Failed()})
+		return true
 	case path == "runs":
 		if r.Method != "GET" {
 			fail(405, "Sincronización de sólo lectura en este recorrido.")

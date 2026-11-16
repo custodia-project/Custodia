@@ -64,6 +64,10 @@ const (
 type Options struct {
 	HTTP         *http.Client
 	MaxBodyBytes int64
+	// AllowRemote accepts an HTTPS tenant origin with an optional path prefix
+	// (for example https://pvwa.example/PasswordVault). It is set only for an
+	// explicitly registered tenant connection; the default stays loopback HTTP.
+	AllowRemote bool
 }
 
 // Client reads one bounded page of CyberArk Safes or Safe members from a
@@ -71,6 +75,7 @@ type Options struct {
 // member counts for the lifetime of one run.
 type Client struct {
 	base         *url.URL
+	basePath     string
 	client       *http.Client
 	maxBodyBytes int64
 
@@ -111,10 +116,13 @@ type safeRef struct {
 // provider credentials and a real tenant profile belong to a later,
 // explicitly authorized slice.
 func New(baseURL string, options Options) (*Client, error) {
-	base, err := parseBaseURL(baseURL)
+	base, err := parseBaseURL(baseURL, options.AllowRemote)
 	if err != nil {
 		return nil, err
 	}
+	basePath := strings.TrimSuffix(base.Path, "/")
+	base.Path = ""
+	base.RawPath = ""
 	client := http.Client{}
 	if options.HTTP != nil {
 		client = *options.HTTP
@@ -130,18 +138,15 @@ func New(baseURL string, options Options) (*Client, error) {
 		options.MaxBodyBytes = defaultMaxBodyBytes
 	}
 	return &Client{
-		base: base, client: &client, maxBodyBytes: options.MaxBodyBytes,
+		base: base, basePath: basePath, client: &client, maxBodyBytes: options.MaxBodyBytes,
 		memberCounts: map[int]int{}, memberSeen: map[int]int{},
 	}, nil
 }
 
-func parseBaseURL(raw string) (*url.URL, error) {
+func parseBaseURL(raw string, allowRemote bool) (*url.URL, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return nil, errors.New("base URL is invalid")
-	}
-	if parsed.Scheme != "http" {
-		return nil, errors.New("base URL must use http")
 	}
 	if parsed.Opaque != "" {
 		return nil, errors.New("base URL must be hierarchical")
@@ -155,22 +160,42 @@ func parseBaseURL(raw string) (*url.URL, error) {
 	if parsed.Fragment != "" || strings.Contains(raw, "#") {
 		return nil, errors.New("base URL must not include a fragment")
 	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return nil, errors.New("base URL must not include a path prefix")
-	}
 	host := parsed.Hostname()
 	if host == "" {
 		return nil, errors.New("base URL requires an explicit host")
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return nil, errors.New("base URL host must be a numeric loopback address")
 	}
 	if port := parsed.Port(); port != "" {
 		number, err := strconv.Atoi(port)
 		if err != nil || number < 1 || number > 65535 {
 			return nil, errors.New("base URL port is invalid")
 		}
+	}
+	if allowRemote {
+		if parsed.Scheme != "https" {
+			return nil, errors.New("tenant base URL must use https")
+		}
+		if parsed.Path == "/" {
+			parsed.Path = ""
+		}
+		if strings.Contains(parsed.Path, "//") || strings.Contains(parsed.Path, "..") {
+			return nil, errors.New("tenant base URL path is invalid")
+		}
+		base := *parsed
+		base.RawQuery = ""
+		base.ForceQuery = false
+		base.Fragment = ""
+		base.RawFragment = ""
+		return &base, nil
+	}
+	if parsed.Scheme != "http" {
+		return nil, errors.New("base URL must use http")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return nil, errors.New("base URL must not include a path prefix")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return nil, errors.New("base URL host must be a numeric loopback address")
 	}
 	base := *parsed
 	base.Path = ""
@@ -255,6 +280,7 @@ func (c *Client) pageURL(cursor string, limit int) (*url.URL, error) {
 }
 
 func (c *Client) collectionPageURL(path, cursor string, limit int) (*url.URL, error) {
+	path = c.basePath + path
 	target := *c.base
 	if cursor == "" {
 		target.Path = path
@@ -735,11 +761,11 @@ func (c *Client) fetchMemberPage(ctx context.Context, safe safeRef, cursor strin
 }
 
 func (c *Client) memberPageURL(safe safeRef, cursor string, limit int) (*url.URL, error) {
-	expectedPath := safesPath + "/" + safe.Name + "/Members"
+	expectedPath := c.basePath + safesPath + "/" + safe.Name + "/Members"
 	target := *c.base
 	if cursor == "" {
 		target.Path = expectedPath
-		target.RawPath = safesPath + "/" + url.PathEscape(safe.Name) + "/Members"
+		target.RawPath = c.basePath + safesPath + "/" + url.PathEscape(safe.Name) + "/Members"
 		query := url.Values{}
 		query.Set("limit", strconv.Itoa(limit))
 		target.RawQuery = query.Encode()
@@ -1079,7 +1105,7 @@ func resolvePSMLink(reference string, catalog []string) (string, string) {
 
 func (c *Client) loadCatalogLocked(ctx context.Context, spec catalogSpec, state *catalogState) error {
 	target := *c.base
-	target.Path = spec.path
+	target.Path = c.basePath + spec.path
 	target.RawQuery = spec.query
 	body, err := c.fetchBody(ctx, &target)
 	if err != nil {

@@ -123,7 +123,7 @@ func TestSyncMigrationUpgradesExistingObservations(t *testing.T) {
 		"ALTER TABLE lab_observations DROP COLUMN last_run_id",
 		"ALTER TABLE lab_observations DROP COLUMN first_run_id",
 		"ALTER TABLE lab_observations DROP COLUMN status",
-		"DELETE FROM lab_schema_migrations WHERE version IN (5,6)",
+		"DELETE FROM lab_schema_migrations WHERE version >= 5",
 	} {
 		if _, err := s.DB.Exec(statement); err != nil {
 			t.Fatal(statement, err)

@@ -1233,3 +1233,39 @@ func TestFetchPlatformPSMLinksPartialAndFailures(t *testing.T) {
 		t.Fatal(outcome)
 	}
 }
+
+func TestRemoteTenantHTTPSWithPathPrefix(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/PasswordVault/API/Safes" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		respond(t, `{"value":[{"safeNumber":1,"safeName":"Alpha","safeUrlId":"alpha"}],"count":1,"nextLink":""}`)(w, r)
+	}))
+	defer server.Close()
+	client, err := New(server.URL+"/PasswordVault", Options{HTTP: server.Client(), AllowRemote: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := client.FetchPage(context.Background(), CollectionSafes, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Objects) != 1 || page.Objects[0].ExternalID != "1" {
+		t.Fatal(page)
+	}
+}
+
+func TestRemoteTenantRejectsUnsafeBase(t *testing.T) {
+	for _, raw := range []string{
+		"http://pam.acme.example",
+		"https://user:pass@pam.acme.example",
+		"https://pam.acme.example?x=1",
+		"https://pam.acme.example#fragment",
+		"https://pam.acme.example/a/../b",
+	} {
+		if _, err := New(raw, Options{AllowRemote: true}); err == nil {
+			t.Fatal("unsafe tenant base accepted", raw)
+		}
+	}
+}

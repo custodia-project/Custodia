@@ -89,7 +89,7 @@ func NewPlan(config Config) (Plan, error) {
 	if !config.Authorized {
 		return Plan{}, errors.New("probe requires explicit owner authorization")
 	}
-	base, err := parseHTTPSOrigin(config.BaseURL, false)
+	base, err := parseHTTPSOrigin(config.BaseURL, true)
 	if err != nil {
 		return Plan{}, err
 	}

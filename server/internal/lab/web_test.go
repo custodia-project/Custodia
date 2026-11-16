@@ -113,7 +113,7 @@ func TestExplicitMigrationPreservesOldLab(t *testing.T) {
 	if err = s.DB.QueryRow("SELECT captured_at FROM lab_snapshot").Scan(&captured); err != nil || captured != "2026-11-16T12:00:00Z" {
 		t.Fatal("migration changed evidence", err)
 	}
-	if _, err = s.DB.Exec("INSERT INTO lab_schema_migrations VALUES(7)"); err != nil {
+	if _, err = s.DB.Exec("INSERT INTO lab_schema_migrations VALUES(?)", SchemaVersion+1); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Migrate(context.Background()); err == nil {

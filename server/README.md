@@ -266,8 +266,23 @@ pública todavía. Para un lector existente:
 ```
 
 La lectura se concede siempre; `--can-run=false` deja al lector sin permiso
-para iniciar corridas. Ambas operaciones quedan auditadas en el host y no
-existe todavía una pantalla de administración.
+para iniciar corridas. Ambas operaciones quedan auditadas en el host.
+
+Alta de una conexión sin tocar el host, desde una instalación vacía:
+
+```sh
+GET  /api/ingestion/connectors
+POST /api/ingestion/connections
+POST /api/ingestion/connections/{id}/probe
+```
+
+`connectors` publica el registro estático con estado, auth, colecciones y
+endpoints. Un conector `planned` no declara contrato y el alta lo rechaza. El
+alta exige administrador, HTTPS con path opcional, un par conector/colección
+implementado y referencias `env:`/`file:`/`secret:`; no contacta el tenant,
+audita `connection_register` y concede lectura/`can_run` al creador. El probe
+usa el mismo plan, CA y límites, no publica observaciones y audita
+`connection_probe`. La respuesta nunca repite la referencia de credencial.
 
 Rutas de /api/ingestion: corridas GET con límite acotado, corrida por ID y sus
 etapas, agendas con intervalo, frescura y fallos consecutivos, registros por

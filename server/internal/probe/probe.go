@@ -113,22 +113,25 @@ func credentialValue(value string) (string, error) {
 // RunPlan resolves authentication outside the repository and probes every
 // allowlisted endpoint sequentially. Transport failures are reported per
 // endpoint; plan, secret, CA or authentication errors fail before a report.
-func RunPlan(ctx context.Context, plan Plan) (Report, error) {
+// Prepare resolves authentication outside the repository and builds a
+// read-only HTTP client for one validated plan. The client injects the bearer
+// token itself, so a sync adapter reusing it cannot forget authorization.
+func Prepare(ctx context.Context, plan Plan) (*http.Client, error) {
 	if !plan.validated {
-		return Report{}, errors.New("probe plan is not validated")
+		return nil, errors.New("probe plan is not validated")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	roots, err := loadRootCAs(plan.CAFile)
 	if err != nil {
-		return Report{}, err
+		return nil, err
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
 	if plan.AuthMode == AuthMTLS {
 		certificate, err := tls.LoadX509KeyPair(plan.ClientCertFile, plan.ClientKeyFile)
 		if err != nil {
-			return Report{}, errors.New("probe client certificate could not be loaded")
+			return nil, errors.New("probe client certificate could not be loaded")
 		}
 		tlsConfig.Certificates = []tls.Certificate{certificate}
 	}
@@ -144,26 +147,53 @@ func RunPlan(ctx context.Context, plan Plan) (Report, error) {
 	case AuthBearer:
 		token, err := ResolveCredential(plan.CredentialRef)
 		if err != nil {
-			return Report{}, err
+			return nil, err
 		}
 		authHeader = "Bearer " + token
 	case AuthOAuthClientCreds:
 		clientID, err := ResolveCredential(plan.ClientIDRef)
 		if err != nil {
-			return Report{}, err
+			return nil, err
 		}
 		secret, err := ResolveCredential(plan.ClientSecretRef)
 		if err != nil {
-			return Report{}, err
+			return nil, err
 		}
 		token, err := fetchOAuthToken(ctx, client, plan, clientID, secret)
 		if err != nil {
-			return Report{}, err
+			return nil, err
 		}
 		authHeader = "Bearer " + token
 	case AuthMTLS:
 	default:
-		return Report{}, errors.New("probe auth mode is not supported")
+		return nil, errors.New("probe auth mode is not supported")
+	}
+	if authHeader != "" {
+		client.Transport = bearerTransport{base: client.Transport, header: authHeader}
+	}
+	return client, nil
+}
+
+// bearerTransport attaches the authorization header to every read-only
+// request. The token stays in memory only.
+type bearerTransport struct {
+	base   http.RoundTripper
+	header string
+}
+
+func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header.Set("Authorization", t.header)
+	return t.base.RoundTrip(clone)
+}
+
+// RunPlan resolves authentication outside the repository and probes every
+// allowlisted endpoint sequentially. Transport failures are reported per
+// endpoint; plan, secret, CA or authentication errors fail before a report.
+func RunPlan(ctx context.Context, plan Plan) (Report, error) {
+	client, err := Prepare(ctx, plan)
+	if err != nil {
+		return Report{}, err
 	}
 	report := Report{
 		BaseURL: plan.BaseURL, AuthMode: string(plan.AuthMode), CredentialRef: plan.CredentialRef,
@@ -171,7 +201,7 @@ func RunPlan(ctx context.Context, plan Plan) (Report, error) {
 	}
 	base := strings.TrimRight(plan.BaseURL, "/")
 	for _, endpoint := range plan.Endpoints {
-		report.Endpoints = append(report.Endpoints, probeEndpoint(ctx, client, base, endpoint, authHeader, plan.Timeout))
+		report.Endpoints = append(report.Endpoints, probeEndpoint(ctx, client, base, endpoint, plan.Timeout))
 	}
 	return report, nil
 }
@@ -254,7 +284,7 @@ func loadRootCAs(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func probeEndpoint(ctx context.Context, client *http.Client, base, endpoint, authHeader string, timeout time.Duration) EndpointResult {
+func probeEndpoint(ctx context.Context, client *http.Client, base, endpoint string, timeout time.Duration) EndpointResult {
 	result := EndpointResult{Endpoint: endpoint}
 	start := time.Now()
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -267,9 +297,6 @@ func probeEndpoint(ctx context.Context, client *http.Client, base, endpoint, aut
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "custodia-probe/1")
-	if authHeader != "" {
-		request.Header.Set("Authorization", authHeader)
-	}
 	response, err := client.Do(request)
 	result.DurationMS = time.Since(start).Milliseconds()
 	if err != nil {

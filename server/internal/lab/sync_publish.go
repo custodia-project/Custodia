@@ -298,7 +298,9 @@ func (s *Store) loadSyncSource(ctx context.Context, connectionID string) (SyncSo
 	return scanSyncSource(s.DB.QueryRowContext(ctx, syncSourceSelect, connectionID))
 }
 
-const syncSourceSelect = `SELECT connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,created_by,created_at
+const syncSourceSelect = `SELECT connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,
+ coalesce(auth_mode,'none'),coalesce(credential_ref,''),coalesce(token_url,''),coalesce(client_id_ref,''),coalesce(client_secret_ref,''),
+ coalesce(scopes_json,'[]'),coalesce(ca_file,''),coalesce(client_cert_file,''),coalesce(client_key_file,''),created_by,created_at
 	FROM lab_sync_sources WHERE connection_id=?`
 
 func loadSyncSourceTx(ctx context.Context, tx *sql.Tx, connectionID string) (SyncSource, error) {
@@ -308,10 +310,21 @@ func loadSyncSourceTx(ctx context.Context, tx *sql.Tx, connectionID string) (Syn
 func scanSyncSource(row rowScanner) (SyncSource, error) {
 	var source SyncSource
 	var enabled int
+	var scopes string
 	err := row.Scan(&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
-		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval, &source.CreatedBy, &source.CreatedAt)
+		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval,
+		&source.AuthMode, &source.CredentialRef, &source.TokenURL, &source.ClientIDRef, &source.ClientSecretRef,
+		&scopes, &source.CAFile, &source.ClientCertFile, &source.ClientKeyFile, &source.CreatedBy, &source.CreatedAt)
+	if err != nil {
+		return SyncSource{}, err
+	}
+	if scopes != "" {
+		if err = json.Unmarshal([]byte(scopes), &source.Scopes); err != nil {
+			return SyncSource{}, err
+		}
+	}
 	source.Enabled = enabled == 1
-	return source, err
+	return source, nil
 }
 
 // actorPrincipalID parses the laboratory actor format. Host and system actors

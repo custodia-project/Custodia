@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"custodia/server/internal/connectors"
 )
 
 var (
@@ -34,23 +36,33 @@ const (
 	syncDefaultPage               = 100
 )
 
-// SyncSource is one read-only HTTP inventory connection. The URL is
-// configuration, never a credential; this laboratory adapter only accepts a
-// numeric loopback HTTP origin.
+// SyncSource is one read-only connection. The URL and credential references
+// are configuration, never secret values. The synthetic connector still
+// requires a numeric loopback HTTP origin; a vendor connector registered by an
+// administrator uses HTTPS and an auth plan validated by the probe package.
 type SyncSource struct {
-	ConnectionID string `json:"connection_id"`
-	Connector    string `json:"connector"`
-	BaseURL      string `json:"base_url"`
-	Collection   string `json:"collection"`
-	Scope        string `json:"scope"`
-	Generation   string `json:"generation"`
-	Enabled      bool   `json:"enabled"`
-	PageSize     int    `json:"page_size"`
-	MaxPages     int    `json:"max_pages"`
-	MaxRecords   int    `json:"max_records"`
-	Interval     int    `json:"interval_minutes"`
-	CreatedBy    string `json:"created_by"`
-	CreatedAt    string `json:"created_at"`
+	ConnectionID    string   `json:"connection_id"`
+	Connector       string   `json:"connector"`
+	BaseURL         string   `json:"base_url"`
+	Collection      string   `json:"collection"`
+	Scope           string   `json:"scope"`
+	Generation      string   `json:"generation"`
+	Enabled         bool     `json:"enabled"`
+	PageSize        int      `json:"page_size"`
+	MaxPages        int      `json:"max_pages"`
+	MaxRecords      int      `json:"max_records"`
+	Interval        int      `json:"interval_minutes"`
+	AuthMode        string   `json:"auth_mode"`
+	CredentialRef   string   `json:"-"`
+	TokenURL        string   `json:"-"`
+	ClientIDRef     string   `json:"-"`
+	ClientSecretRef string   `json:"-"`
+	Scopes          []string `json:"-"`
+	CAFile          string   `json:"-"`
+	ClientCertFile  string   `json:"-"`
+	ClientKeyFile   string   `json:"-"`
+	CreatedBy       string   `json:"created_by"`
+	CreatedAt       string   `json:"created_at"`
 }
 
 // SyncRun is the durable history row. Empty optional timestamps are omitted by
@@ -300,11 +312,12 @@ func (s *Store) SyncSourcesFor(ctx context.Context, p Principal) ([]SyncSource, 
 }
 
 func validateSyncConfiguration(source SyncSource, grants []string) error {
-	if !connectionPattern.MatchString(source.ConnectionID) {
-		return fmt.Errorf("invalid connection ID")
-	}
-	if source.Connector != syncConnector && source.Connector != syncConnectorCyberArkPAMSafes {
+	descriptor, found := connectors.Get(source.Connector)
+	if !found || !connectors.Connectable(descriptor) {
 		return fmt.Errorf("unsupported sync connector")
+	}
+	if err := validateCommonConfiguration(source, grants); err != nil {
+		return err
 	}
 	if err := validLabBaseURL(source.BaseURL); err != nil {
 		return err
@@ -312,6 +325,15 @@ func validateSyncConfiguration(source SyncSource, grants []string) error {
 	collection, found := collectionForSync(source.Collection)
 	if !found || !connectorSupportsCollection(source.Connector, collection) {
 		return fmt.Errorf("unsupported inventory collection")
+	}
+	return nil
+}
+
+// validateCommonConfiguration holds the checks shared by the host laboratory
+// path and the administrative onboarding path.
+func validateCommonConfiguration(source SyncSource, grants []string) error {
+	if !connectionPattern.MatchString(source.ConnectionID) {
+		return fmt.Errorf("invalid connection ID")
 	}
 	if strings.TrimSpace(source.Scope) == "" || len(source.Scope) > 128 || strings.ContainsAny(source.Scope, "\r\n") {
 		return fmt.Errorf("invalid sync scope")
