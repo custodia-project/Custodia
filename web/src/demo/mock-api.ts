@@ -4,10 +4,10 @@
  * (envuelta en fetch, ver install.ts). No contiene datos reales.
  */
 export type MockRequest = { url: string; method: string; body: unknown };
-export type MockResponse = { status: number; contentType: string; body: string };
+export type MockResponse = { status: number; contentType: string; body: string; headers?: Record<string, string> };
 type MockRoute = {
   request: () => { url: () => string; method: () => string; postDataJSON: () => unknown };
-  fulfill: (response: { status?: number; contentType?: string; body?: string }) => Promise<void>;
+  fulfill: (response: { status?: number; contentType?: string; body?: string; headers?: Record<string, string> }) => Promise<void>;
 };
 
 export const unauthenticated = {
@@ -30,10 +30,12 @@ export type MockLocalUser = {
   connections: string[];
 };
 
-export type MockOptions = { onRequest?: (pathname: string) => void; permissions?: string[]; authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal'; sessionUser?: Record<string, unknown>; userRows?: Record<string, unknown>[]; includeSafe?: boolean; largeInventory?: boolean; decommissionCandidate?: boolean; accountManagementUnavailable?: boolean; initialVisibleWorkspaces?: string[]; initialRecentWorkspaces?: string[]; dashboardWidgets?: Record<string, unknown>[]; latestRun?: Record<string, unknown> | null; apiDocsEnabled?: boolean; netskopeMetrics?: Record<string, unknown>; authenticated?: boolean; localUsers?: MockLocalUser[]; localCredentials?: Record<string, string> };
+export type MockOIDCUser = { issuer: string; subject: string; display_name: string; email: string; enabled: boolean; last_login_at: string | null; active_sessions: number; connections: string[] };
+
+export type MockOptions = { onRequest?: (pathname: string) => void; permissions?: string[]; authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal'; sessionUser?: Record<string, unknown>; userRows?: Record<string, unknown>[]; includeSafe?: boolean; largeInventory?: boolean; decommissionCandidate?: boolean; accountManagementUnavailable?: boolean; initialVisibleWorkspaces?: string[]; initialRecentWorkspaces?: string[]; dashboardWidgets?: Record<string, unknown>[]; latestRun?: Record<string, unknown> | null; apiDocsEnabled?: boolean; netskopeMetrics?: Record<string, unknown>; authenticated?: boolean; localUsers?: MockLocalUser[]; localCredentials?: Record<string, string>; oidcEnabled?: boolean };
 
 export function createMockApi(options: MockOptions = {}): (request: MockRequest) => Promise<MockResponse> {
-  const { onRequest, permissions = ['inventory:read', 'inventory:write', 'catalogs:write', 'access:manage', 'safes:read', 'safes:manage', 'coverage:read', 'coverage:manage', 'ingestion:preview', 'ingestion:run', 'findings:manage', 'catalogs:manage'], authMode = 'local', sessionUser = { actor_id: 'operator-1', name: 'Operador', email: 'operator@example.com', roles: ['operator'], role_names: [t('Operador de plataforma')] }, userRows = [{ actor_id: 'carlos@example.com', email: 'carlos@example.com', display_name: 'Carlos Ortiz', is_active: true, must_change_password: false, roles: ['admin'], auth_source: 'local', last_login_at: null }], includeSafe = false, largeInventory = false, decommissionCandidate = false, accountManagementUnavailable = false, initialVisibleWorkspaces = ['safes'], initialRecentWorkspaces = [], dashboardWidgets, latestRun = null, apiDocsEnabled = true, netskopeMetrics = {}, authenticated = true, localUsers = [{ username: 'ada.admin', display_name: 'Ada Admin', enabled: true, administrator: true, must_change_password: false, last_login_at: '2026-11-15T09:00:00Z', active_sessions: 1, connections: ['acme-identity', 'acme-netskope'] }], localCredentials } = options;
+  const { onRequest, permissions = ['inventory:read', 'inventory:write', 'catalogs:write', 'access:manage', 'safes:read', 'safes:manage', 'coverage:read', 'coverage:manage', 'ingestion:preview', 'ingestion:run', 'findings:manage', 'catalogs:manage'], authMode = 'local', sessionUser = { actor_id: 'operator-1', name: 'Operador', email: 'operator@example.com', roles: ['operator'], role_names: [t('Operador de plataforma')] }, userRows = [{ actor_id: 'carlos@example.com', email: 'carlos@example.com', display_name: 'Carlos Ortiz', is_active: true, must_change_password: false, roles: ['admin'], auth_source: 'local', last_login_at: null }], includeSafe = false, largeInventory = false, decommissionCandidate = false, accountManagementUnavailable = false, initialVisibleWorkspaces = ['safes'], initialRecentWorkspaces = [], dashboardWidgets, latestRun = null, apiDocsEnabled = true, netskopeMetrics = {}, authenticated = true, oidcEnabled = false, localUsers = [{ username: 'ada.admin', display_name: 'Ada Admin', enabled: true, administrator: true, must_change_password: false, last_login_at: '2026-11-15T09:00:00Z', active_sessions: 1, connections: ['acme-identity', 'acme-netskope'] }], localCredentials } = options;
   // Local-mode demo state: the login, password change and account
   // administration endpoints below are stateful, so the demo behaves like the
   // Go handler without a backend. All names and passwords are fictional.
@@ -45,6 +47,19 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
   const localAccounts: MockLocalUser[] = localUsers.map((user) => ({ ...user, connections: [...user.connections] }));
   const currentUsername = () => String(currentUser.actor_id ?? '').startsWith('local:') ? String(currentUser.actor_id).slice('local:'.length) : '';
   const canManageLocal = () => signedIn && (permissions.includes('access:manage') || permissions.includes('access:local_users_manage'));
+  const canManageOIDC = () => signedIn && (permissions.includes('access:manage') || permissions.includes('access:oidc_manage'));
+  const oidcNow = '2026-11-16T12:00:00Z';
+  let oidcConfig: Record<string, unknown> | null = oidcEnabled ? {
+    issuer: 'https://idp.acme.example', client_id: 'custodia-demo', client_secret_ref: 'env:CUSTODIA_OIDC_SECRET',
+    redirect_uri: 'https://custodia.acme.example/api/auth/oidc/callback', scopes: 'openid profile email',
+    subject_claim: 'sub', email_claim: 'email', name_claim: 'name', enabled: true,
+    tested_at: oidcNow, test_ok: true, test_detail: 'Descubrimiento y claves verificados (2 claves). No se probó el login interactivo.',
+    updated_at: oidcNow, updated_by: 'principal:1',
+  } : null;
+  let oidcHealthy = oidcEnabled;
+  const oidcPendingRows = [{ issuer: 'https://idp.acme.example', subject: 'sub-ada', email: 'ada@acme.example', display_name: 'Ada Externa', first_seen: oidcNow, last_seen: oidcNow }];
+  const oidcUserRows: MockOIDCUser[] = oidcEnabled ? [{ issuer: 'https://idp.acme.example', subject: 'sub-bruno', display_name: 'Bruno Externo', email: 'bruno@acme.example', enabled: true, last_login_at: oidcNow, active_sessions: 1, connections: ['acme-identity'] }] : [];
+  const oidcStatus = () => ({ configured: oidcConfig !== null, enabled: oidcConfig?.enabled === true, login_url: '/api/auth/oidc/start' });
   const peopleByEmail = new Map<string, { key: string; email: string; display_name: string; identities: Record<string, unknown>[] }>();
   for (const user of userRows) {
     const email = String(user.email || '');
@@ -384,6 +399,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       },
       '/api/ingestion/runs': { rows: [] },
       '/api/inventory/tools': inventoryTools,
+      '/api/connections': { rows: [{ id: 'acme-identity', kind: 'identity' }, { id: 'acme-netskope', kind: 'sse' }] },
       '/api/events': { rows: [] },
       '/api/workspaces/preferences': { visible_workspaces: ['safes'], hidden_workspaces: [], recent_workspaces: [], updated_at: null },
       '/api/search': {
@@ -645,6 +661,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
     };
     let responseBody = bodies[pathname] ?? {};
     let responseStatus = 200;
+    let responseHeaders: Record<string, string> = {};
     const method = route.request().method();
     if (pathname.startsWith('/api/inventory/metrics/') && pathname.endsWith('/records')) {
       const metricId = decodeURIComponent(pathname.slice('/api/inventory/metrics/'.length, -'/records'.length));
@@ -662,9 +679,10 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       }
     }
     if (pathname === '/api/auth/status') {
+      const extra = authMode === 'oidc' ? { oidc: oidcStatus() } : {};
       responseBody = signedIn
-        ? { mode: authMode, authenticated: true, permissions, api_docs_enabled: apiDocsEnabled, ...(authMode === 'local' ? { csrf_token: csrfToken } : {}), user: currentUser }
-        : { ...unauthenticated, mode: authMode };
+        ? { mode: authMode, authenticated: true, permissions, api_docs_enabled: apiDocsEnabled, ...(authMode === 'local' || authMode === 'oidc' ? { csrf_token: csrfToken } : {}), user: currentUser, ...extra }
+        : { ...unauthenticated, mode: authMode, ...extra };
     }
     if (pathname === '/api/auth/login' && method === 'POST') {
       const payload = (route.request().postDataJSON() ?? {}) as { username?: string; email?: string; password?: string };
@@ -677,6 +695,9 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       } else if (!account.enabled) {
         responseStatus = 403;
         responseBody = { detail: 'Tu cuenta no está habilitada en Custodia. Contactá al administrador.' };
+      } else if (authMode === 'oidc' && !account.administrator) {
+        responseStatus = 403;
+        responseBody = { detail: 'En modo OIDC el acceso con contraseña está reservado a administradores locales.' };
       } else {
         signedIn = true;
         currentUser = { actor_id: `local:${account.username}`, name: account.display_name, email: '', roles: [account.administrator ? 'admin' : 'reader'], role_names: [account.administrator ? t('Administrador') : t('Lector')], must_change_password: account.must_change_password, auth_source: 'local' };
@@ -689,6 +710,120 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       currentUser = sessionUser;
       csrfToken = 'demo-csrf-token';
       responseBody = { logged_out: true };
+    }
+    if (pathname === '/api/auth/oidc/start' && method === 'GET') {
+      signedIn = true;
+      currentUser = { actor_id: 'oidc:sub-ada', name: 'Ada Externa', email: 'ada@acme.example', roles: ['reader'], role_names: [t('Lector')], must_change_password: false, auth_source: 'oidc' };
+      csrfToken = 'demo-csrf-oidc';
+      responseStatus = 302;
+      responseHeaders = { Location: '/' };
+      responseBody = {};
+    }
+    if (pathname === '/api/access/oidc') {
+      if (!canManageOIDC()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else if (method === 'GET') {
+        responseBody = { config: oidcConfig, healthy: oidcHealthy };
+      } else if (method === 'PUT') {
+        const payload = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+        if (!String(payload.issuer ?? '').trim() || !String(payload.client_id ?? '').trim()) {
+          responseStatus = 400;
+          responseBody = { detail: 'El emisor y el client ID son obligatorios.' };
+        } else if (!String(payload.redirect_uri ?? '').endsWith('/api/auth/oidc/callback')) {
+          responseStatus = 400;
+          responseBody = { detail: 'La URL de retorno debe terminar en /api/auth/oidc/callback.' };
+        } else {
+          oidcConfig = { ...payload, enabled: false, tested_at: null, test_ok: false, test_detail: '', updated_at: oidcNow, updated_by: 'principal:1' };
+          oidcHealthy = false;
+          responseBody = { saved: true, enabled: false };
+        }
+      }
+    }
+    if (pathname === '/api/access/oidc/test' && method === 'POST') {
+      if (!canManageOIDC() || !oidcConfig) {
+        responseStatus = method === 'POST' && !oidcConfig ? 409 : 403;
+        responseBody = { detail: method === 'POST' && !oidcConfig ? 'Guardá la configuración antes de probarla.' : 'Permiso de administración requerido.' };
+      } else {
+        oidcConfig = { ...oidcConfig, tested_at: oidcNow, test_ok: true, test_detail: 'Descubrimiento y claves verificados (2 claves). No se probó el login interactivo.' };
+        oidcHealthy = true;
+        responseBody = { ok: true, detail: oidcConfig.test_detail };
+      }
+    }
+    if ((pathname === '/api/access/oidc/enable' || pathname === '/api/access/oidc/disable') && method === 'POST') {
+      if (!canManageOIDC() || !oidcConfig) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else if (pathname.endsWith('/enable') && !oidcHealthy) {
+        responseStatus = 409;
+        responseBody = { detail: 'Probá la configuración actual antes de activar el proveedor.' };
+      } else {
+        const enabled = pathname.endsWith('/enable');
+        oidcConfig = { ...oidcConfig, enabled };
+        responseBody = { enabled };
+      }
+    }
+    if (pathname === '/api/access/oidc/pending' && method === 'GET') {
+      if (!canManageOIDC()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else {
+        responseBody = { rows: oidcPendingRows };
+      }
+    }
+    if (pathname === '/api/access/oidc/pending/approve' && method === 'POST') {
+      if (!canManageOIDC()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else {
+        const payload = (route.request().postDataJSON() ?? {}) as { issuer?: string; subject?: string; connections?: string[] };
+        const index = oidcPendingRows.findIndex((row) => row.issuer === payload.issuer && row.subject === payload.subject);
+        if (index < 0) {
+          responseStatus = 409;
+          responseBody = { detail: 'La identidad ya no está pendiente.' };
+        } else {
+          const [row] = oidcPendingRows.splice(index, 1);
+          oidcUserRows.push({ ...row, enabled: true, last_login_at: null, active_sessions: 0, connections: payload.connections ?? [] });
+          responseStatus = 204;
+          responseBody = {};
+        }
+      }
+    }
+    if (pathname === '/api/access/oidc/pending/deny' && method === 'POST') {
+      if (!canManageOIDC()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else {
+        const payload = (route.request().postDataJSON() ?? {}) as { issuer?: string; subject?: string };
+        const index = oidcPendingRows.findIndex((row) => row.issuer === payload.issuer && row.subject === payload.subject);
+        if (index >= 0) oidcPendingRows.splice(index, 1);
+        responseStatus = index >= 0 ? 204 : 409;
+        responseBody = {};
+      }
+    }
+    if (pathname === '/api/access/oidc/users' && method === 'GET') {
+      responseBody = canManageOIDC() ? { rows: oidcUserRows } : { rows: [] };
+      if (!canManageOIDC()) responseStatus = 403;
+    }
+    if (pathname.startsWith('/api/access/oidc/users/') && method === 'POST') {
+      if (!canManageOIDC()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else {
+        const action = pathname.slice('/api/access/oidc/users/'.length);
+        const payload = (route.request().postDataJSON() ?? {}) as { issuer?: string; subject?: string };
+        const account = oidcUserRows.find((row) => row.issuer === payload.issuer && row.subject === payload.subject);
+        if (!account) {
+          responseStatus = 409;
+          responseBody = { detail: 'La cuenta OIDC no existe.' };
+        } else {
+          if (action === 'disable') { account.enabled = false; account.active_sessions = 0; }
+          if (action === 'enable') account.enabled = true;
+          if (action === 'revoke-sessions') account.active_sessions = 0;
+          responseStatus = 204;
+          responseBody = {};
+        }
+      }
     }
     if (pathname === '/api/auth/password' && method === 'POST') {
       const payload = (route.request().postDataJSON() ?? {}) as { current_password?: string; new_password?: string };
@@ -904,6 +1039,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       status: responseStatus,
       contentType: 'application/json',
       body: JSON.stringify(responseBody),
+      headers: responseHeaders,
     });
   };
   return async (request: MockRequest): Promise<MockResponse> => {
@@ -911,7 +1047,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
     const route: MockRoute = {
       request: () => ({ url: () => request.url, method: () => request.method, postDataJSON: () => request.body }),
       fulfill: async (response) => {
-        result = { status: response.status ?? 200, contentType: response.contentType ?? 'application/json', body: response.body ?? '' };
+        result = { status: response.status ?? 200, contentType: response.contentType ?? 'application/json', body: response.body ?? '', headers: response.headers };
       },
     };
     await handler(route);

@@ -40,8 +40,11 @@ type Profile struct {
 	Mode, Name, Email  string
 	CSRFToken          string
 	MustChangePassword bool
+	AuthSource         string
 	// AdminPermissions are announced only when the principal is an administrator.
 	AdminPermissions []string
+	// Extra adds mode-specific, non-secret fields to the authenticated status.
+	Extra map[string]any
 }
 
 // ServePrincipal receives identity only from a composition-root authentication adapter.
@@ -144,7 +147,12 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 		if profile.CSRFToken != "" {
 			status["csrf_token"] = profile.CSRFToken
 			user["must_change_password"] = profile.MustChangePassword
-			user["auth_source"] = "local"
+			if profile.AuthSource != "" {
+				user["auth_source"] = profile.AuthSource
+			}
+		}
+		for key, value := range profile.Extra {
+			status[key] = value
 		}
 		send(200, status)
 

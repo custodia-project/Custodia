@@ -126,7 +126,9 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     setLoginBusy(true);
     onError('');
     try {
-      const local = authStatus?.mode === 'local';
+      // OIDC mode keeps an explicit password form for host-created local
+      // administrators; it is the break-glass path, not a fallback.
+      const local = authStatus?.mode === 'local' || authStatus?.mode === 'oidc';
       const login = await api<{ csrf_token?: string }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify(local

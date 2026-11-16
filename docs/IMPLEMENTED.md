@@ -6,6 +6,44 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Acceso OIDC configurable desde la consola — 16/11
+
+`PROD-OIDC-001`: `serve --auth-mode oidc` es un modo independiente, sin
+fallback a contraseña ni modo híbrido. La migración aditiva 10 agrega
+`oidc_config`, `oidc_states`, `oidc_accounts` y `oidc_pending`; las sesiones
+siguen usando `local_sessions` (token opaco, sólo SHA-256 en SQLite) con el
+mismo contrato de 12 horas/30 minutos, CSRF y auditoría.
+
+La consola (`Usuarios y permisos → Acceso OIDC`) guarda emisor, client ID,
+referencia del secreto, URL de retorno, scopes y claims. Guardar deja un
+borrador inactivo y revoca las sesiones OIDC; activar exige una prueba
+correcta del descubrimiento y del JWKS de la configuración vigente hecha en
+los últimos diez minutos. El cliente usa Authorization Code + PKCE S256,
+`state` de un solo uso con hash en SQLite y cookie `Lax` ligada al callback,
+`nonce`, y verificación de ID token con `go-oidc/v3` (emisor, audiencia,
+expiración, nonce, `azp`). El access token no autentica.
+
+La identidad es emisor + sujeto. Una identidad válida desconocida queda en
+una cola acotada (1.024) sin principal ni concesión; un administrador la
+aprueba indicando un subconjunto de sus propias conexiones, en una transacción
+con su auditoría. El email es sólo presentación. El administrador local
+conserva un formulario de contraseña explícito de emergencia, con el mismo
+throttling y errores genéricos; una cuenta local que no sea administradora no
+puede usarlo. El secreto se lee de `env:`, `file:` o `secret:`
+(`CUSTODIA_OIDC_SECRET_DIR`) y nunca se guarda, devuelve, audita ni registra.
+
+Pruebas: proveedor simulado RS256 con descubrimiento, JWKS y endpoint de
+token; guardar/probar/activar/desactivar; activación sin prueba, con prueba
+fallida o vieja; state ausente, repetido, vencido o con cookie distinta;
+nonce y audiencia incorrectos; cola y aprobación con conexiones fuera del
+alcance; sesión, logout, deshabilitado con revocación y cambio de
+configuración con revocación; administrador de emergencia. La web agrega el
+botón del proveedor, el formulario de emergencia, la consola y una prueba e2e
+con la API simulada. `verify:go:oidc` repite en Chromium, contra Go y SQLite
+con un proveedor falso local, la consola (borrador, prueba, activación), la
+aprobación con alcance y el login con sesión OIDC. La prueba de configuración no completa un login
+interactivo; falta aceptar un proveedor real y desplegar con TLS/proxy.
+
 ## Integración de login local e inventario — 16/11
 
 Las dos entregas conviven en el mismo árbol. La allowlist de preferencias de

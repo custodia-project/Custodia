@@ -12,6 +12,7 @@
     "verify:go": "cd server && go vet ./... && go test -race ./... && go build ./...",
     "verify:go:web": "node scripts/verify-go-web.mjs",
     "verify:go:local": "node scripts/verify-go-local.mjs",
+    "verify:go:oidc": "node scripts/verify-go-oidc.mjs",
     "verify:go:gateway": "node scripts/verify-go-gateway.mjs",
     "verify:go:ops": "node scripts/verify-go-ops.mjs",
     "package:go": "node scripts/package-go.mjs"

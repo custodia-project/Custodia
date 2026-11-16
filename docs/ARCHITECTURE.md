@@ -122,7 +122,9 @@ no prueban identidad empresarial. Emisión/revocación y preferencias propias
 se auditan junto con el cambio. La credencial inicial no evade la habilitación
 o las concesiones de su principal. Jobs/exports siguen sin implementación ni
 permisos implícitos. Ozal tiene receptor firmado por petición y bootstrap
-explícito; OIDC y la administración de conexiones/reglas quedan pendientes; ver [acceso](ACCESS.md) y [laboratorio](../server/README.md).
+explícito; OIDC genérico se configura desde la consola con prueba previa y
+administrador local de emergencia; la administración de conexiones/reglas
+sigue pendiente; ver [acceso](ACCESS.md) y [laboratorio](../server/README.md).
 
 ## Modelo mínimo
 

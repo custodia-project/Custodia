@@ -28,6 +28,6 @@ export function installDemoApi() {
     const text = request.method === 'GET' || request.method === 'HEAD' ? '' : await request.text();
     if (text) { try { body = JSON.parse(text); } catch { body = text; } }
     const response = await handle({ url: url.href, method: request.method, body });
-    return new Response(response.status === 204 ? null : response.body, { status: response.status, headers: { 'Content-Type': response.contentType } });
+    return new Response(response.status === 204 ? null : response.body, { status: response.status, headers: { 'Content-Type': response.contentType, ...response.headers } });
   };
 }

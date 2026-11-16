@@ -33,13 +33,25 @@ var (
 	IPAttempts   = lab.AttemptPolicy{Limit: 50, Window: 15 * time.Minute, Lock: 15 * time.Minute}
 )
 
-// Config is the explicit local-mode configuration.
+// Config is the explicit authentication-mode configuration. Mode is "local"
+// or "oidc"; an empty value means local for existing callers.
 type Config struct {
 	PublicOrigin string
+	Mode         string
+}
+
+func (c Config) mode() string {
+	if c.Mode == "" {
+		return "local"
+	}
+	return c.Mode
 }
 
 // Validate accepts an HTTPS origin, or numeric HTTP loopback for the harness.
 func (c Config) Validate() error {
+	if c.mode() != "local" && c.mode() != "oidc" {
+		return fmt.Errorf("authentication mode must be local or oidc")
+	}
 	u, err := url.Parse(c.PublicOrigin)
 	if err != nil || u.Host == "" || u.Hostname() == "" || u.ForceQuery || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
 		return fmt.Errorf("public origin must be an HTTPS origin or numeric HTTP loopback without path")
@@ -88,14 +100,18 @@ type handler struct {
 	config Config
 	now    func() time.Time
 	files  http.Handler
+	oidc   *oidcClient
 }
 
-// NewHandler serves local mode only. Ozal assertions, laboratory bearers and
-// identity headers are ignored: the session cookie is the only credential.
+// NewHandler serves the password mode. Ozal assertions, laboratory bearers
+// and identity headers are ignored: the session cookie is the only credential.
 func NewHandler(store *lab.Store, config Config, now func() time.Time, files http.Handler) (http.Handler, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
+	// NewHandler keeps its historical local contract even if a caller sets a
+	// different mode by mistake.
+	config.Mode = "local"
 	return &handler{store: store, config: config, now: now, files: files}, nil
 }
 
@@ -171,6 +187,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := h.now()
+	if h.oidcMode() {
+		switch r.URL.Path {
+		case "/api/auth/oidc/start":
+			h.oidcStart(w, r, current)
+			return
+		case "/api/auth/oidc/callback":
+			h.oidcCallback(w, r, current)
+			return
+		}
+	}
 	if r.URL.Path == "/api/auth/login" {
 		if r.Method != "POST" {
 			detail(w, 405, "Usá POST para iniciar sesión.")
@@ -183,7 +209,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var session lab.LocalSession
 	err := lab.ErrNoSession
 	if token != "" {
-		session, err = h.store.ResolveLocalSession(r.Context(), TokenHash(token), IdleTimeout, current)
+		session, err = h.resolveSession(r, token, current)
 	}
 	if err != nil && err != lab.ErrNoSession {
 		detail(w, 503, "No se pudo verificar la sesión.")
@@ -194,7 +220,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.expireCookie(w)
 		}
 		if r.URL.Path == "/api/auth/status" && r.Method == "GET" {
-			send(w, 200, map[string]any{"mode": "local", "authenticated": false, "setup_available": false, "permissions": []string{}, "api_docs_enabled": false, "user": nil})
+			body := map[string]any{"mode": h.config.mode(), "authenticated": false, "setup_available": false, "permissions": []string{}, "api_docs_enabled": false, "user": nil}
+			if h.oidcMode() {
+				body["oidc"] = h.oidcStatus(r.Context())
+			}
+			send(w, 200, body)
 			return
 		}
 		detail(w, 401, "Iniciá sesión para continuar.")
@@ -214,7 +244,11 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			detail(w, 405, "Usá POST para cerrar sesión.")
 			return
 		}
-		if err := h.store.EndLocalSession(r.Context(), session.Principal, TokenHash(token), current); err != nil {
+		end := h.store.EndLocalSession
+		if session.Issuer != lab.LocalIssuer {
+			end = h.store.EndOIDCSession
+		}
+		if err := end(r.Context(), session.Principal, TokenHash(token), current); err != nil {
 			detail(w, 503, "No se pudo cerrar la sesión.")
 			return
 		}
@@ -226,6 +260,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			detail(w, 405, "Usá POST para cambiar la contraseña.")
 			return
 		}
+		if session.Issuer != lab.LocalIssuer {
+			detail(w, 400, "El cambio de contraseña no aplica a una cuenta externa.")
+			return
+		}
 		h.changePassword(w, r, session, current)
 		return
 	}
@@ -233,13 +271,29 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		detail(w, 403, "Cambiá tu contraseña temporal antes de continuar.")
 		return
 	}
+	if h.oidcMode() && (r.URL.Path == "/api/access/oidc" || strings.HasPrefix(r.URL.Path, "/api/access/oidc/")) {
+		h.oidcAdmin(w, r, session, current)
+		return
+	}
 	if r.URL.Path == "/api/access/users" || strings.HasPrefix(r.URL.Path, "/api/access/users/") {
 		h.users(w, r, session, current)
 		return
 	}
+	adminPermissions := []string{"access:local_users_manage"}
+	if h.oidcMode() {
+		adminPermissions = append(adminPermissions, "access:oidc_manage")
+	}
+	authSource := "local"
+	if session.Issuer != lab.LocalIssuer {
+		authSource = "oidc"
+	}
+	extra := map[string]any{}
+	if h.oidcMode() {
+		extra["oidc"] = h.oidcStatus(r.Context())
+	}
 	h.store.ServePrincipal(w, r, current, session.Principal, lab.Profile{
-		Mode: "local", Name: session.DisplayName, CSRFToken: csrf, MustChangePassword: session.MustChange,
-		AdminPermissions: []string{"access:local_users_manage"},
+		Mode: h.config.mode(), Name: session.DisplayName, CSRFToken: csrf, MustChangePassword: session.MustChange,
+		AuthSource: authSource, AdminPermissions: adminPermissions, Extra: extra,
 	})
 }
 
@@ -308,6 +362,12 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request, current time.Tim
 	}
 	if !credential.Enabled {
 		detail(w, 403, "Tu cuenta no está habilitada en Custodia. Contactá al administrador.")
+		return
+	}
+	// OIDC mode never falls back to password authentication for end users.
+	// A host-created local administrator remains the explicit break-glass path.
+	if h.oidcMode() && !h.store.IsAdministrator(r.Context(), credential.Principal) {
+		detail(w, 403, "En modo OIDC el acceso con contraseña está reservado a administradores locales.")
 		return
 	}
 	if err = h.store.ClearLoginFailures(r.Context(), "user:"+username); err != nil {

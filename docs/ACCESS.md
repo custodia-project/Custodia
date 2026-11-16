@@ -11,10 +11,12 @@ sesión revocable en servidor (contrato abajo). El receptor de identidad
 firmada de Ozal sigue disponible como integración opcional. El administrador
 elige el modo al arrancar `serve`; nunca hay fallback automático entre modos.
 El alta inicial del administrador es siempre un comando explícito en el host.
-La integración Ozal se verifica con claves efímeras y un gateway de prueba;
-la aceptación contra una instancia real de Ozal, la aceptación desplegada del
-modo local con TLS/proxy y los despliegues siguen pendientes. OIDC genérico
-todavía es un diseño, no otro modo disponible.
+La integración Ozal se verifica con claves efímeras y un gateway de prueba.
+OIDC genérico es un modo independiente, configurable desde la consola, con
+prueba previa y administrador local de emergencia. La aceptación contra un
+proveedor OIDC real, la aceptación contra una instancia real de Ozal, la
+aceptación desplegada del modo local con TLS/proxy y los despliegues siguen
+pendientes.
 
 ## Modos separados
 
@@ -23,17 +25,22 @@ todavía es un diseño, no otro modo disponible.
 | Demo pública | Sin login, datos sintéticos. | Ningún acceso a inventario privado. |
 | `serve --auth-mode local` | Cookie de sesión emitida tras usuario y contraseña. | Cuentas locales habilitadas, permisos por conexión y auditoría. |
 | `serve --auth-mode ozal` | Aserción firmada nueva para cada petición, también assets. | Principales habilitados, permisos por conexión y auditoría. |
+| `serve --auth-mode oidc` | Sesión emitida tras el flujo OIDC, o contraseña de un administrador local de emergencia. | Cuentas OIDC aprobadas, administradores locales, permisos por conexión y auditoría. |
 | `serve-lab` | Bearer aleatorio de laboratorio, sólo loopback. | Principales sintéticos y concesiones explícitas. |
 
 Todos los servidores escuchan sólo en IP numérica loopback. Eso no autentica
 al usuario. `--auth-mode` es obligatorio en serve y admite exactamente
-`local` u `ozal`; no hay modo híbrido ni valor por defecto. En modo `ozal`
+`local`, `oidc` u `ozal`; no hay modo híbrido ni valor por defecto. En modo `oidc`
+el login principal es el proveedor; la contraseña sólo autentica a un
+administrador local creado en el host, como vía de emergencia explícita. En modo `ozal`
 se exige la firma incluso con acceso directo y no se admite token de
 laboratorio, cookie de sesión local, headers de usuario/email ni login local.
 En modo `local` no se registra el receptor Ozal: una aserción, un bearer o
-un header de usuario no autentican; sólo la cookie de sesión. Cuando falla
-un modo, la petición se rechaza; no se prueba el otro. La instalación debe
-cerrar también los caminos directos al backend y proteger su host.
+un header de usuario no autentican; sólo la cookie de sesión. En modo `oidc`
+no se registran el receptor Ozal ni el bearer de laboratorio; una aserción o
+un header de identidad no autentican. Cuando falla un modo, la petición se
+rechaza; no se prueba el otro. La instalación debe cerrar también los caminos
+directos al backend y proteger su host.
 
 ## Modo `ozal`: contrato firmado
 
@@ -114,37 +121,107 @@ y logout en navegador. El login del fixture es sólo una selección sintética;
 no prueba passkeys, cookies o políticas de una instalación real de Ozal.
 Ver [comandos y configuración](../server/README.md).
 
-## Qué sería «OIDC propio» en Custodia
+## Modo `oidc`: contrato
 
-Custodia sería **cliente OIDC**, también llamado relying party. El proveedor
-gestiona contraseña/passkey/MFA y entrega la identidad; Custodia no crea un
-servidor de identidad. La configuración usa emisor, client ID, referencia al
-secreto y callback registrados; ningún nombre de fabricante forma parte del
-dominio del producto.
+Custodia es **cliente OIDC** (relying party), no un servidor de identidad. El
+proveedor gestiona contraseña, passkey, MFA y políticas; entrega la identidad
+y Custodia conserva sesión, permisos por conexión y auditoría. Ningún nombre
+de fabricante forma parte del dominio del producto: Ozal u otro proveedor
+compatible pueden usarse como emisor.
 
-Flujo objetivo: navegador → proveedor → callback de Custodia. Authorization
-Code con PKCE S256; `state` y `nonce` de un solo uso y con vencimiento.
-El backend canjea el código, valida firma mediante claves del emisor
-configurado, `iss`, `aud`, `exp`, `nonce` y `azp` cuando corresponde. No
-autentica con un access token sin validar su propósito ni acepta un issuer
-elegido libremente por el navegador.
+Selección. `serve --auth-mode oidc --public-origin ORIGEN` con la misma regla
+de ORIGEN que el modo local (HTTPS sin ruta; HTTP sólo en IP numérica de
+loopback para el harness). El modo rechaza `--gateway-config`; no se registran
+el receptor Ozal, el bearer de laboratorio ni headers de identidad. El login
+principal es el proveedor. La contraseña sólo autentica a un administrador
+local creado en el host, como vía de emergencia explícita: no hay fallback
+automático, botón silencioso ni modo híbrido. Si no existe un administrador
+local, `serve` lo advierte al arrancar.
 
-La identidad persistida es emisor + `sub`, nunca sólo email. Después de
-autenticar, Custodia crea una sesión opaca revocable en servidor: cookie
-Secure/HttpOnly/SameSite compatible con el callback, rotación, expiración y
-CSRF en mutaciones. Tokens y secretos permanecen en backend. Validar destinos
-de retorno y distinguir logout local de cierre de sesión del proveedor.
-No enlazar automáticamente cuentas de OIDC y Ozal por email.
+Configuración. Se administra desde la consola (`GET/PUT /api/access/oidc`),
+sólo por un administrador, con CSRF y auditoría. Campos: emisor exacto,
+client ID, referencia del secreto, URL de retorno, scopes, claim de sujeto y
+claims de email y nombre. La URL de retorno debe ser exactamente
+`PUBLIC_ORIGIN/api/auth/oidc/callback`. El emisor debe ser HTTPS sin query,
+fragmento ni barra final; HTTP sólo en IP numérica de loopback para pruebas.
+Guardar crea o reemplaza un **borrador**: desactiva el proveedor, borra la
+prueba anterior y revoca las sesiones OIDC vivas. Una identidad OIDC sólo se
+emite cuando se activa una configuración probada.
 
-Validar con un proveedor simulado: código repetido, state/nonce ausentes,
-firma/emisor/audiencia incorrectos, expiración, rotación de claves, usuario
-deshabilitado, revocación local y permisos insuficientes. Un proveedor real
-se acepta después con su configuración de laboratorio. Posterior al camino inicial con Ozal; ver el tracker.
+Secreto. `client_secret_ref` admite `env:NOMBRE`, `file:/RUTA_ABSOLUTA` o
+`secret:NOMBRE` (directorio en `CUSTODIA_OIDC_SECRET_DIR`). El valor se lee en
+memoria al iniciar el flujo; nunca se guarda, audita, devuelve ni aparece en
+logs. Un cliente público puede dejar la referencia vacía.
+
+Prueba y activación. `POST /api/access/oidc/test` lee el descubrimiento del
+emisor, exige que `issuer` coincida exactamente, que los endpoints sean HTTPS
+(o loopback numérico) y que el JWKS publique al menos una clave asimétrica de
+firma; además comprueba que el flujo `code` esté anunciado. No simula un login
+interactivo. `POST /api/access/oidc/enable` exige una prueba correcta de la
+configuración vigente hecha en los últimos diez minutos; `disable` la
+desactiva y revoca las sesiones OIDC. Cada cambio y prueba se audita.
+
+Flujo. `GET /api/auth/oidc/start` exige un proveedor activo y redirige con
+Authorization Code + PKCE S256. `state` y `nonce` son aleatorios de un solo
+uso; SQLite guarda sólo el SHA-256 de `state`, con vencimiento de diez minutos,
+y una cookie `HttpOnly`, `Secure`, `SameSite=Lax` y `Path` del callback liga
+la solicitud al navegador. El callback exige que la cookie y el `state` de la
+query coincidan, consume el estado antes de canjear el código y rechaza
+repeticiones. El backend canjea el código con el verificador PKCE y valida el
+ID token con `github.com/coreos/go-oidc/v3` (Apache 2.0) sobre
+`golang.org/x/oauth2` (BSD-3): firma con las claves del emisor, `iss`, `aud`,
+`exp` y `nonce`; `azp` cuando corresponde. No autentica con un access token
+sin validar su propósito ni acepta un emisor elegido por el navegador. Los
+errores vuelven a la interfaz como códigos estables (`oidc_state`,
+`oidc_token`, `oidc_exchange`, `oidc_pending`, etc.), nunca como tokens o
+detalles del proveedor. `verify:go:oidc` recorre el flujo completo en Chromium
+contra Go, SQLite y un proveedor falso local.
+
+Identidad y alta. La identidad persistida es emisor + sujeto, nunca sólo
+email. Un `sub` puede mapearse desde otro claim, pero debe ser estable y no
+vacío; email y nombre son sólo presentación y no se usa `email_verified` para
+autorizar. Una identidad válida desconocida entra en una cola de aprobación
+(máximo 1.024), sin principal ni concesión. Un administrador la aprueba con
+`POST /api/access/oidc/pending/approve` indicando emisor, sujeto y un
+subconjunto de sus propias conexiones; la creación del principal, sus
+concesiones y la auditoría son atómicas. Rechazarla la elimina. No hay
+aprovisionamiento automático, enlace por email con cuentas locales u Ozal, ni
+roles o grupos heredados del proveedor. Una cuenta deshabilitada obtiene 403
+y no puede iniciar sesión.
+
+Sesión. Tras validar el ID token, Custodia emite una sesión opaca de servidor
+con el mismo contrato que el modo local: token de 32 bytes, sólo SHA-256 en
+SQLite, cookie `HttpOnly`/`Secure`/`SameSite=Strict`, 12 horas absolutas y 30
+minutos de inactividad, y CSRF por header más Origin exacto en mutaciones.
+Deshabilitar la cuenta, revocar sesiones, cambiar la configuración, desactivar
+el proveedor o cerrar sesión las elimina. El logout es local: no cierra la
+sesión del proveedor ni redirige a un destino elegido por la respuesta.
+
+Emergencia. Si el proveedor falla o está mal configurado, el administrador
+local entra por el formulario de contraseña de la misma pantalla, bajo el
+rótulo explícito de acceso de administrador local. Ese formulario usa el mismo
+throttling, errores genéricos y política de contraseñas del modo local; una
+cuenta local que no sea administradora no puede usarlo. La recuperación sigue
+siendo `reset-password` en el host.
+
+Límites de esta entrega. No hay MFA propio (lo aporta el proveedor), mapeo de
+grupos a roles, edición de concesiones después de aprobar, logout iniciado por
+el proveedor, múltiples emisores simultáneos ni aprovisionamiento por SCIM.
+La prueba de configuración no completa un login interactivo. La aceptación
+contra un proveedor OIDC real y el despliegue con TLS/proxy siguen pendientes.
+
+Validación. Pruebas Go con un proveedor simulado que firma RS256 y publica
+descubrimiento y JWKS: guardar, probar, activar y desactivar; activar sin
+prueba o con prueba vieja falla; state ausente, repetido o vencido; cookie de
+state distinta; nonce y audiencia incorrectos; identidad desconocida a la cola;
+aprobación con conexiones fuera del alcance del administrador; sesión, logout,
+deshabilitado con revocación, cambio de configuración con revocación y
+administrador local de emergencia. La prueba e2e de la web cubre el botón del
+proveedor y la consola de configuración, prueba, activación y aprobación con
+la API simulada. Falta repetir el recorrido contra un proveedor real.
 
 Referencias: [OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0.html)
 y [OAuth Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.html).
-Seleccionar una librería Go mantenida al implementar; no escribir verificación
-criptográfica ni un protocolo OAuth a mano.
 
 ## Modo `local`: contrato
 

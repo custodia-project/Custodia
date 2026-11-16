@@ -1,0 +1,32 @@
+.oidc-settings { animation: user-panel-in .22s ease-out both; background: var(--bg-panel); border: 1px solid var(--border-soft); margin-bottom: 24px; max-width: 100%; overflow: visible; }
+.oidc-settings .section-heading { margin: 0; padding: 16px 18px 10px; }
+.oidc-status { align-self: flex-start; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 3px 8px; text-transform: uppercase; white-space: nowrap; }
+.oidc-status.active { background: color-mix(in srgb, var(--status-resolved-bg, var(--accent)) 60%, transparent); color: var(--status-resolved-text, var(--accent-strong)); }
+.oidc-status.ready { background: var(--status-pending-bg); color: var(--status-pending-text); }
+.oidc-status.pending { background: var(--bg-subtle); color: var(--text-muted); }
+.oidc-status.inactive { background: color-mix(in srgb, var(--status-error-bg, #fee4e2) 70%, transparent); color: var(--status-error-text, #b42318); }
+.oidc-form { border-top: 1px solid var(--border-soft); display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px 18px 16px; }
+.oidc-field { color: var(--text-secondary); display: flex; flex-direction: column; font-size: 11px; font-weight: 700; gap: 6px; }
+.oidc-field.wide { grid-column: 1 / -1; }
+.oidc-field input { background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-primary); font: inherit; min-height: 36px; padding: 7px 9px; }
+.oidc-field input:focus { background: var(--bg-elevated); border-color: var(--accent); box-shadow: var(--focus-ring); outline: 0; }
+.oidc-field input[readonly] { color: var(--text-muted); }
+.oidc-note { color: var(--text-muted); font-size: 12px; margin: 0; }
+.oidc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.oidc-test { align-items: flex-start; display: flex; font-size: 12px; gap: 6px; margin: 0; }
+.oidc-test.ok { color: var(--status-resolved-text, var(--accent-strong)); }
+.oidc-test.failed { color: var(--status-error-text, #b42318); }
+.oidc-block { border-top: 1px solid var(--border-soft); padding: 14px 18px; }
+.oidc-block header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 8px; }
+.oidc-block h3 { font-size: 14px; margin: 0 0 4px; }
+.oidc-approve { display: grid; gap: 12px; padding: 16px 18px; }
+.oidc-approve dl { display: grid; gap: 8px; margin: 0; }
+.oidc-approve dt { color: var(--text-muted); font-size: 10px; letter-spacing: .03em; text-transform: uppercase; }
+.oidc-approve dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .oidc-form { grid-template-columns: 1fr; }
+  .oidc-field.wide { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oidc-settings { animation: none; }
+}

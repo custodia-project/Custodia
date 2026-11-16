@@ -109,3 +109,6 @@
   .auth-submit-spinner { animation: none; }
   .auth-form input { transition: none; }
 }
+
+.auth-divider { align-items: center; color: var(--text-muted); display: flex; font-size: 11px; gap: 10px; letter-spacing: .06em; margin: 14px 0 0; text-transform: uppercase; }
+.auth-divider::before, .auth-divider::after { background: var(--border-soft); content: ''; flex: 1; height: 1px; }

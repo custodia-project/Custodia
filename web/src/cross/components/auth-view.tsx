@@ -97,6 +97,24 @@ function AuthNotices({ message, error }: { message?: string; error?: string }) {
   </>;
 }
 
+/* Callback failures are explained generically: the provider response, tokens
+   and state never reach the browser URL beyond a stable error code. */
+const OIDC_AUTH_ERRORS: Record<string, () => string> = {
+  oidc_unavailable: () => t('El proveedor de identidad todavía no está disponible. Un administrador local puede configurarlo.'),
+  oidc_pending: () => t('Tu identidad quedó pendiente de aprobación. Un administrador debe habilitarla antes de ingresar.'),
+  oidc_disabled: () => t('Tu cuenta no está habilitada en Custodia. Contactá al administrador.'),
+  oidc_denied: () => t('El proveedor no completó el acceso.'),
+  oidc_state: () => t('La solicitud de acceso venció. Volvé a intentarlo.'),
+  oidc_exchange: () => t('No se pudo completar el intercambio con el proveedor.'),
+  oidc_token: () => t('El proveedor devolvió una identidad no válida.'),
+  oidc_pending_full: () => t('Hay demasiadas solicitudes pendientes. Contactá al administrador.'),
+};
+
+function oidcErrorFromQuery() {
+  const code = new URLSearchParams(window.location.search).get('auth_error');
+  return code ? (OIDC_AUTH_ERRORS[code] ?? OIDC_AUTH_ERRORS.oidc_denied)() : '';
+}
+
 function AuthSubmitContent({ busy, idle, pending }: { busy: boolean; idle: string; pending: string }) {
   return <span className="auth-submit-content">{busy ? <span className="auth-submit-spinner" aria-hidden="true" /> : null}<span>{busy ? pending : idle}</span></span>;
 }
@@ -137,9 +155,12 @@ export function AuthView({ auth, error }: AuthViewProps) {
     const passwordScore = checks.filter((check) => check.valid).length;
     const canContinue = loginEmail.trim().length > 0 && registerName.trim().length > 0;
     const canCreate = passwordScore === checks.length && loginPassword === registerPasswordConfirm;
-    const localLoginAvailable = authStatus.mode === 'local' || authStatus.mode === 'hybrid';
-    const usernameLogin = authStatus.mode === 'local';
-    const oidcLoginAvailable = authStatus.mode === 'oidc' || authStatus.mode === 'hybrid';
+    const localLoginAvailable = authStatus.mode === 'local' || authStatus.mode === 'hybrid' || authStatus.mode === 'oidc';
+    const usernameLogin = authStatus.mode === 'local' || authStatus.mode === 'oidc';
+    const oidcLoginAvailable = authStatus.mode === 'hybrid';
+    const oidcProvider = authStatus.mode === 'oidc' ? authStatus.oidc : undefined;
+    const oidcEnabled = oidcProvider?.enabled === true;
+    const queryError = oidcErrorFromQuery();
     /* AUTH-AGENT-001: with Okta enabled the main login is Okta only; the local
        form lives on its own path for the automation account. The backend still
        decides who may sign in locally. */
@@ -153,18 +174,26 @@ export function AuthView({ auth, error }: AuthViewProps) {
       ? !showRegistration
         ? <AuthHeader title={t('Creá la cuenta inicial')} detail="Vas a usarla para ingresar y administrar Custodia." />
         : <AuthHeader eyebrow={`PASO ${setupStep} DE 2`} title={setupStep === 1 ? t('Tus datos') : t('Elegí una contraseña')} />
-      : <AuthHeader title={t('Iniciar sesión')} detail="Portal de métricas y relaciones entre herramientas de seguridad" />;
+      : <AuthHeader title={t('Iniciar sesión')} detail={authStatus.mode === 'oidc' ? t('Ingresá con el proveedor de identidad de tu organización') : 'Portal de métricas y relaciones entre herramientas de seguridad'} />;
 
     return <AuthShell>
       {header}
-      <AuthNotices message={authMessage} error={error} />
+      <AuthNotices message={authMessage} error={error || queryError} />
       {setupAvailable && !showRegistration ? <button className="button primary auth-submit" type="button" onClick={() => setShowRegistration(true)}>{t('Crear cuenta')}</button> : null}
       {setupAvailable && showRegistration && <form className="auth-form" noValidate onSubmit={(event) => { event.preventDefault(); if (setupStep === 1) { if (canContinue) setSetupStep(2); return; } void submitRegistration(event); }}>
         {setupStep === 1 ? <><label>{t('Nombre')}<input value={registerName} onChange={(event) => setRegisterName(event.target.value)} autoComplete="name" placeholder={t('Cómo te llamamos')} required /></label><label>{t('Email')}<input type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="tu@email.com" required /></label><button className="button primary auth-submit" type="submit" disabled={!canContinue}>{t('Continuar')}</button></> : <><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="new-password" placeholder={t('Creá una contraseña')} autoFocus /><div className="password-strength"><div className="password-strength-bar"><span style={{ width: passwordScore * 20 + '%' }} /></div><small>{passwordScore < 3 ? t('Todavía es débil') : passwordScore < 5 ? t('Casi lista') : t('Contraseña segura')}</small></div><div className="password-checks">{checks.map((check) => <span className={check.valid ? 'valid' : ''} key={check.label}>{check.valid ? '✓' : '○'} {check.label}</span>)}</div></label><label>{t('Confirmar contraseña')}<PasswordInput value={registerPasswordConfirm} onChange={setRegisterPasswordConfirm} autoComplete="new-password" placeholder={t('Repetí tu contraseña')} /></label><button className="button primary auth-submit" type="submit" disabled={registerBusy || !canCreate}>{registerBusy ? t('Creando cuenta...') : t('Crear cuenta')}</button><button className="auth-link" type="button" onClick={() => setSetupStep(1)}>{t('Volver')}</button></>}
       </form>}
       {!setupAvailable && <>
-        {selectedLoginMethod === 'local' && localLoginAvailable ? <div className="auth-form-stage"><form className="auth-form" noValidate onSubmit={submitLogin}><label>{usernameLogin ? t('Usuario') : t('Email')}<input type={usernameLogin ? 'text' : 'email'} autoComplete="username" value={loginEmail} placeholder={usernameLogin ? 'ada.admin' : 'nombre@empresa.com'} autoFocus onChange={(event) => setLoginEmail(event.target.value)} required /></label><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="current-password" /></label><button className="button primary auth-submit" type="submit" disabled={loginBusy}><AuthSubmitContent busy={loginBusy} idle="Iniciar sesión" pending="Ingresando..." /></button></form>{authStatus.mode === 'hybrid' ? <a className="auth-link" href="/">{t('Entrar con Okta')}</a> : <p className="auth-provider-hint">{t('¿No recordás tu contraseña? Contactá a un administrador.')}</p>}</div> : null}
-        {selectedLoginMethod === 'oidc' && oidcLoginAvailable ? <div className="auth-form-stage"><form className="auth-form" noValidate onSubmit={submitOidcLogin}><label>{t('Email corporativo')}<input type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><button className="button primary auth-submit" type="submit">{t('Continuar con Okta')}</button></form></div> : null}
+        {authStatus.mode === 'oidc' ? <div className="auth-form-stage">
+          {oidcEnabled
+            ? <a className="button primary auth-submit" href={oidcProvider?.login_url || '/api/auth/oidc/start'}>{t('Continuar con el proveedor')}</a>
+            : <p className="auth-provider-hint">{t('El proveedor de identidad todavía no está activo. Un administrador local puede configurarlo desde Usuarios y permisos.')}</p>}
+          <p className="auth-divider"><span>{t('Acceso de administrador local')}</span></p>
+          <form className="auth-form" noValidate onSubmit={submitLogin}><label>{t('Usuario')}<input type="text" autoComplete="username" value={loginEmail} placeholder="ada.admin" autoFocus onChange={(event) => setLoginEmail(event.target.value)} required /></label><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="current-password" /></label><button className="button primary auth-submit" type="submit" disabled={loginBusy}><AuthSubmitContent busy={loginBusy} idle="Iniciar sesión" pending="Ingresando..." /></button></form>
+          <p className="auth-provider-hint">{t('Usá esta vía sólo si el proveedor no está disponible.')}</p>
+        </div> : null}
+        {authStatus.mode !== 'oidc' && selectedLoginMethod === 'local' && localLoginAvailable ? <div className="auth-form-stage"><form className="auth-form" noValidate onSubmit={submitLogin}><label>{usernameLogin ? t('Usuario') : t('Email')}<input type={usernameLogin ? 'text' : 'email'} autoComplete="username" value={loginEmail} placeholder={usernameLogin ? 'ada.admin' : 'nombre@empresa.com'} autoFocus onChange={(event) => setLoginEmail(event.target.value)} required /></label><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="current-password" /></label><button className="button primary auth-submit" type="submit" disabled={loginBusy}><AuthSubmitContent busy={loginBusy} idle="Iniciar sesión" pending="Ingresando..." /></button></form>{authStatus.mode === 'hybrid' ? <a className="auth-link" href="/">{t('Entrar con Okta')}</a> : <p className="auth-provider-hint">{t('¿No recordás tu contraseña? Contactá a un administrador.')}</p>}</div> : null}
+        {authStatus.mode !== 'oidc' && selectedLoginMethod === 'oidc' && oidcLoginAvailable ? <div className="auth-form-stage"><form className="auth-form" noValidate onSubmit={submitOidcLogin}><label>{t('Email corporativo')}<input type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="tu@empresa.com" required /></label><button className="button primary auth-submit" type="submit">{t('Continuar con Okta')}</button></form></div> : null}
       </>}
     </AuthShell>;
   }

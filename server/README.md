@@ -367,6 +367,40 @@ construye el binario y la web, crea el administrador con la contraseña por
 stdin y recorre en Chromium login, contraseña temporal y revocación por
 deshabilitado, sin mocks ni respuestas interceptadas.
 
+## Modo OIDC (proveedor de identidad)
+
+`serve` también acepta `--auth-mode oidc`; el modo es explícito y no hay
+fallback a contraseña. El login principal es el proveedor OIDC configurado
+desde `Usuarios y permisos → Acceso OIDC`; la contraseña sólo sirve al
+administrador local creado en el host (emergencia). Contrato completo en
+[ACCESS.md](../docs/ACCESS.md#modo-oidc-contrato).
+
+```sh
+/tmp/custodia init --dir /ruta/nueva/custodia-data
+umask 077; read -rs P; printf '%s\n' "$P" > /ruta/privada/admin.password; unset P
+/tmp/custodia create-admin --dir /ruta/nueva/custodia-data --username ada.admin --display-name "Ada Admin" --password-file /ruta/privada/admin.password
+shred -u /ruta/privada/admin.password
+/tmp/custodia serve --auth-mode oidc --public-origin https://custodia.acme.example --dir /ruta/nueva/custodia-data --web-dir /ruta/al/build/web
+```
+
+En la consola: emisor, client ID, referencia del secreto, URL de retorno
+(`https://custodia.acme.example/api/auth/oidc/callback`), scopes y claims.
+Guardar deja un borrador inactivo; «Probar configuración» lee descubrimiento
+y JWKS; «Activar proveedor» exige una prueba correcta de esa configuración en
+los últimos diez minutos. Cualquier cambio desactiva el proveedor y revoca las
+sesiones OIDC.
+
+El secreto se referencia, nunca se guarda: `env:NOMBRE`, `file:/RUTA` o
+`secret:NOMBRE` con el directorio en `CUSTODIA_OIDC_SECRET_DIR`. La
+verificación usa `github.com/coreos/go-oidc/v3` v3.21.0 (Apache 2.0) y
+`golang.org/x/oauth2` v0.38.0 (BSD-3). Las identidades desconocidas quedan
+pendientes hasta que un administrador las apruebe con un subconjunto de sus
+conexiones. La prueba de configuración no completa un login interactivo.
+`npm run verify:go:oidc` construye el binario y la web y recorre en Chromium,
+contra Go/SQLite y un proveedor falso local, la consola (borrador, prueba,
+activación), la aprobación con alcance y el login OIDC. La aceptación contra
+un proveedor real y el despliegue con TLS/proxy siguen pendientes.
+
 ## Identidad de Ozal y primer administrador
 
 El receptor usa github.com/go-jose/go-jose/v4 v4.1.9 (Apache 2.0).

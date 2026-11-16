@@ -337,6 +337,8 @@ func TestLocalAccountCommands(t *testing.T) {
 		{"serve", "--dir", dir, "--auth-mode", "local", "--public-origin", "https://custodia.acme.example", "--gateway-config", "gateway.json"},
 		{"serve", "--dir", dir, "--auth-mode", "ozal", "--public-origin", "https://custodia.acme.example"},
 		{"serve", "--dir", dir, "--auth-mode", "ozal"},
+		{"serve", "--dir", dir, "--auth-mode", "oidc"},
+		{"serve", "--dir", dir, "--auth-mode", "oidc", "--public-origin", "https://custodia.acme.example", "--gateway-config", "gateway.json"},
 		{"serve-lab", "--dir", dir, "--auth-mode", "local"},
 	} {
 		if err := command(args...); err == nil {

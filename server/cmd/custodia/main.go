@@ -127,8 +127,8 @@ func run() error {
 	dir := f.String("dir", "", "private Custodia data directory")
 	webDir := f.String("web-dir", "", "compiled real frontend directory (optional)")
 	gatewayConfig := f.String("gateway-config", "", "Ozal assertion configuration (public key references only)")
-	authMode := f.String("auth-mode", "", "serve authentication mode: local or ozal (required, no default)")
-	publicOrigin := f.String("public-origin", "", "local mode public origin (HTTPS, or numeric HTTP loopback for tests)")
+	authMode := f.String("auth-mode", "", "serve authentication mode: local, oidc or ozal (required, no default)")
+	publicOrigin := f.String("public-origin", "", "local/oidc public origin (HTTPS, or numeric HTTP loopback for tests)")
 	username := f.String("username", "", "local account username")
 	displayName := f.String("display-name", "", "local account display name")
 	passwordFile := f.String("password-file", "", "private file whose first line is the password (default: standard input)")
@@ -547,8 +547,19 @@ func run() error {
 				if exists, err := s.LocalAccountsExist(context.Background()); err == nil && !exists {
 					fmt.Println("No local accounts yet: run create-admin on this host.")
 				}
+			case "oidc":
+				if *gatewayConfig != "" {
+					return fmt.Errorf("oidc mode does not accept --gateway-config")
+				}
+				handler, err = localauth.NewOIDCHandler(s, localauth.Config{PublicOrigin: *publicOrigin, Mode: "oidc"}, time.Now, files)
+				if err != nil {
+					return err
+				}
+				if exists, err := s.LocalAccountsExist(context.Background()); err == nil && !exists {
+					fmt.Println("No local administrator yet: run create-admin on this host before enabling OIDC.")
+				}
 			default:
-				return fmt.Errorf("serve requires --auth-mode local or --auth-mode ozal")
+				return fmt.Errorf("serve requires --auth-mode local, --auth-mode oidc or --auth-mode ozal")
 			}
 		}
 		srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
