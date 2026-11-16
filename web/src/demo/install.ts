@@ -16,7 +16,7 @@ export function installDemoApi() {
     includeSafe: true,
     permissions: [
       'inventory:read', 'safes:read', 'coverage:read', 'catalogs:read', 'pam:catalogs_read',
-      'identity:catalogs_read', 'netskope:read', 'audit:read',
+      'identity:catalogs_read', 'netskope:read', 'audit:read', 'access:local_users_manage',
     ],
   }));
   const realFetch = window.fetch.bind(window);

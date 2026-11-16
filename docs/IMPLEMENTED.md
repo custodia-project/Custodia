@@ -6,6 +6,35 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Login local, sesiones y administración mínima — 16/11
+
+[ACCESS.md](ACCESS.md#modo-local-contrato) fija el contrato antes del código:
+argon2id v19 con 64 MiB, 3 iteraciones, paralelismo 2, sal de 16 bytes y hash
+de 32; sesión opaca de 12 h absolutas y 30 min de inactividad con cookie
+`HttpOnly`/`Secure`/`SameSite=Strict`; CSRF de sesión; límites de 5 fallos por
+usuario y 50 por IP en 15 min; modo `local` u `ozal` explícito, sin fallback.
+
+La migración aditiva 9 crea cuentas locales, sesiones y bloqueos persistidos
+sin duplicar los principales ni las concesiones por conexión existentes; se
+re-aplica con `IF NOT EXISTS` y conserva datos al actualizar desde la versión
+8. `serve --auth-mode local --public-origin` monta el handler local; `create-admin`
+y `reset-password` toman la contraseña por la primera línea de un archivo
+privado o de la entrada estándar, nunca por argumento, y auditan como `host`.
+La API `login/logout/password/status` y la administración `/api/access/users`
+(sólo administrador, CSRF y auditoría) no devuelven contraseñas ni hashes.
+
+`go vet ./...`, `go test -race ./...` y `go build ./...` verdes en `server/`;
+la prueba de integración crea el administrador por CLI con la contraseña por
+stdin y recorre por HTTP real login, cookie, CSRF, contraseña temporal,
+deshabilitado, revocación, cambio de contraseña y logout. Del lado web,
+`typecheck`, `lint`, `test:unit` (497) y `build:demo` verdes; la API simulada
+de la demo incorpora login local y cuentas con sesiones revocables, y una
+prueba de navegador recorre login, creación y deshabilitado contra esa API.
+`verify:go:local` repite en Chromium contra Go/SQLite el error genérico de
+login, la creación de un lector, el cambio de contraseña temporal y el
+deshabilitado que revoca su sesión viva. Faltan TLS/proxy y aceptación
+desplegada.
+
 ## Una conexión de tenant, varias colecciones — 16/11
 
 La migración aditiva 8 agrega `group_id` a `lab_sync_sources` y lo rellena con

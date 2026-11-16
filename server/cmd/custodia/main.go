@@ -1,17 +1,21 @@
-// Custodia serves verified Ozal identities or an explicit synthetic laboratory.
+// Custodia serves local accounts, verified Ozal identities or an explicit
+// synthetic laboratory. The authentication mode is always chosen explicitly.
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"custodia/server/internal/gateway"
 	"custodia/server/internal/lab"
+	"custodia/server/internal/localauth"
 	"custodia/server/internal/probe"
 	"custodia/server/internal/sqlitebackup"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -61,6 +65,54 @@ func validateRestoredDatabase(path string) error {
 	return nil
 }
 
+// readPassword takes the first line of a private regular file, or of a
+// non-terminal standard input. A password is never a command-line argument.
+func readPassword(path string, stdin *os.File) (string, error) {
+	var source io.Reader = stdin
+	if path != "" {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("--password-file must be a regular file")
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return "", fmt.Errorf("--password-file must not be readable by group or others")
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return "", fmt.Errorf("cannot open --password-file")
+		}
+		defer file.Close()
+		source = file
+	} else if info, err := stdin.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return "", fmt.Errorf("pipe the password on standard input or use --password-file; terminal input would echo it")
+	}
+	line, err := bufio.NewReader(io.LimitReader(source, 4097)).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return "", fmt.Errorf("cannot read password")
+	}
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	if len(line) > 4096 || line == "" {
+		return "", fmt.Errorf("password missing or too long")
+	}
+	return line, nil
+}
+
+func openInstallation(dir string) (*lab.Store, error) {
+	path := filepath.Join(dir, "state.db")
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	s, err := lab.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.CheckSchema(context.Background()); err != nil {
+		s.DB.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -69,12 +121,17 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
+		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|create-admin|reset-password|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "private Custodia data directory")
 	webDir := f.String("web-dir", "", "compiled real frontend directory (optional)")
 	gatewayConfig := f.String("gateway-config", "", "Ozal assertion configuration (public key references only)")
+	authMode := f.String("auth-mode", "", "serve authentication mode: local or ozal (required, no default)")
+	publicOrigin := f.String("public-origin", "", "local mode public origin (HTTPS, or numeric HTTP loopback for tests)")
+	username := f.String("username", "", "local account username")
+	displayName := f.String("display-name", "", "local account display name")
+	passwordFile := f.String("password-file", "", "private file whose first line is the password (default: standard input)")
 	subject := f.String("subject", "", "opaque subject (synthetic only for laboratory commands)")
 	connections := f.String("connections", "", "comma-separated allowed connection IDs")
 	output := f.String("out", "", "new private credential file or backup destination")
@@ -112,8 +169,8 @@ func run() error {
 	if *dir == "" && os.Args[1] != "probe-pam" {
 		return fmt.Errorf("--dir is required")
 	}
-	if strings.HasSuffix(os.Args[1], "-lab") && *gatewayConfig != "" {
-		return fmt.Errorf("laboratory commands cannot use --gateway-config")
+	if strings.HasSuffix(os.Args[1], "-lab") && (*gatewayConfig != "" || *authMode != "" || *publicOrigin != "") {
+		return fmt.Errorf("laboratory commands cannot use --gateway-config, --auth-mode or --public-origin")
 	}
 	switch os.Args[1] {
 	case "probe-pam":
@@ -352,6 +409,52 @@ func run() error {
 		}
 		defer s.DB.Close()
 		return s.Migrate(context.Background())
+	case "create-admin", "reset-password":
+		if *gatewayConfig != "" || *authMode != "" {
+			return fmt.Errorf("local account commands do not take --gateway-config or --auth-mode")
+		}
+		normalized, ok := lab.NormalizeLocalUsername(*username)
+		if !ok {
+			return fmt.Errorf("--username must be 1-128 characters of a-z 0-9 . _ @ -")
+		}
+		if os.Args[1] == "create-admin" && strings.TrimSpace(*displayName) == "" {
+			return fmt.Errorf("--display-name is required")
+		}
+		s, err := openInstallation(*dir)
+		if err != nil {
+			return err
+		}
+		defer s.DB.Close()
+		password, err := readPassword(*passwordFile, os.Stdin)
+		if err != nil {
+			return err
+		}
+		if err = localauth.CheckPolicy(normalized, password); err != nil {
+			return fmt.Errorf("password must have %d-%d characters and differ from the username", localauth.MinPasswordLength, localauth.MaxPasswordLength)
+		}
+		hash, err := localauth.HashPassword(context.Background(), password)
+		if err != nil {
+			return err
+		}
+		if os.Args[1] == "reset-password" {
+			if err = s.ResetLocalPassword(context.Background(), normalized, hash, time.Now()); err != nil {
+				return fmt.Errorf("cannot reset password for that local account")
+			}
+			fmt.Println("Temporary password set; sessions revoked. The user must change it at next sign-in.")
+			return nil
+		}
+		scope := []string{}
+		if *connections != "" {
+			scope = strings.Split(*connections, ",")
+		}
+		if err = s.CreateLocalAdministrator(context.Background(), normalized, *displayName, hash, scope, time.Now()); err != nil {
+			if errors.Is(err, lab.ErrLocalBootstrap) {
+				return err
+			}
+			return fmt.Errorf("cannot create local administrator: check username and connections")
+		}
+		fmt.Println("Local administrator created:", normalized)
+		return nil
 	case "bootstrap-admin":
 		config, err := gateway.LoadConfig(*gatewayConfig)
 		if err != nil {
@@ -412,10 +515,6 @@ func run() error {
 				}
 			}
 		} else {
-			config, err := gateway.LoadConfig(*gatewayConfig)
-			if err != nil {
-				return err
-			}
 			var files http.Handler
 			if *webDir != "" {
 				files, err = lab.WithWeb(http.NotFoundHandler(), *webDir)
@@ -423,9 +522,33 @@ func run() error {
 					return err
 				}
 			}
-			handler, err = gateway.NewHandler(s, config, time.Now, files)
-			if err != nil {
-				return err
+			// The mode is explicit; one never falls back to the other.
+			switch *authMode {
+			case "ozal":
+				if *publicOrigin != "" {
+					return fmt.Errorf("ozal mode takes public_origin from --gateway-config")
+				}
+				config, err := gateway.LoadConfig(*gatewayConfig)
+				if err != nil {
+					return err
+				}
+				handler, err = gateway.NewHandler(s, config, time.Now, files)
+				if err != nil {
+					return err
+				}
+			case "local":
+				if *gatewayConfig != "" {
+					return fmt.Errorf("local mode does not accept --gateway-config")
+				}
+				handler, err = localauth.NewHandler(s, localauth.Config{PublicOrigin: *publicOrigin}, time.Now, files)
+				if err != nil {
+					return err
+				}
+				if exists, err := s.LocalAccountsExist(context.Background()); err == nil && !exists {
+					fmt.Println("No local accounts yet: run create-admin on this host.")
+				}
+			default:
+				return fmt.Errorf("serve requires --auth-mode local or --auth-mode ozal")
 			}
 		}
 		srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}

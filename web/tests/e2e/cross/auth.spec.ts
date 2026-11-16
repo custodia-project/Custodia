@@ -13,7 +13,7 @@ test('login view exposes an accessible form', async ({ page }) => {
   await page.goto('/pam');
 
   await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Email', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Usuario', exact: true })).toBeVisible();
   await expect(page.locator('input[type="password"]')).toBeVisible();
   await expect.poll(() => page.evaluate(() => ({
     theme: document.documentElement.dataset.theme,
@@ -25,6 +25,41 @@ test('login view exposes an accessible form', async ({ page }) => {
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   expect(results.violations).toEqual([]);
+});
+
+test('local mode signs in with a username and reaches the local account administration', async ({ page }) => {
+  await mockAuthenticatedApp(page, {
+    authenticated: false,
+    authMode: 'local',
+    permissions: ['access:local_users_manage'],
+    localCredentials: { 'ada.admin': 'correct horse battery staple' },
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Usuario', exact: true }).fill('ada.admin');
+  await page.locator('input[type="password"]').fill('wrong password');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.locator('.auth-error')).toHaveText('Usuario o contraseña incorrectos.');
+  await page.locator('input[type="password"]').fill('correct horse battery staple');
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(page.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible();
+
+  await page.goto('/admin/access');
+  await expect(page.getByRole('heading', { name: 'Acceso a la plataforma' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Crear usuario local' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'ada.admin' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Crear usuario local' }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Crear usuario local' });
+  await drawer.getByLabel('Usuario', { exact: true }).fill('bruno');
+  await drawer.getByLabel('Nombre', { exact: true }).fill('Bruno Reader');
+  await drawer.getByLabel('Contraseña temporal').fill('temporary reader passphrase');
+  await drawer.getByRole('button', { name: 'Crear usuario local' }).click();
+  const created = page.getByRole('row', { name: /bruno/i });
+  await expect(created).toBeVisible();
+  await expect(page.locator('.created-credential')).toContainText('temporary reader passphrase');
+  await created.getByRole('button', { name: 'Deshabilitar' }).click();
+  await expect(created.getByText('Deshabilitado')).toBeVisible();
 });
 
 test('AUTH-AGENT-001 hybrid main login offers only Okta', async ({ page }) => {

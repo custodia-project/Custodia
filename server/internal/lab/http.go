@@ -34,7 +34,15 @@ func (s *Store) Handler(token string, now func() time.Time) http.Handler {
 	})
 }
 
-type Profile struct{ Mode, Name, Email string }
+// Profile is what an authentication adapter tells /api/auth/status. Local
+// sessions add their CSRF token and the temporary-password flag.
+type Profile struct {
+	Mode, Name, Email  string
+	CSRFToken          string
+	MustChangePassword bool
+	// AdminPermissions are announced only when the principal is an administrator.
+	AdminPermissions []string
+}
 
 // ServePrincipal receives identity only from a composition-root authentication adapter.
 func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current time.Time, principal Principal, profile Profile) {
@@ -121,13 +129,21 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 			// manage-gate alternate). The Go administration capability remains
 			// installation:manage; this only exposes the audit surface.
 			permissions = append(permissions, "installation:manage", "audit:read")
+			permissions = append(permissions, profile.AdminPermissions...)
 			roles = []string{"admin"}
 			roleNames = []string{"Administrador"}
 		}
 		if canRun, err := s.SyncCanRunAny(r.Context(), principal); err == nil && canRun {
 			permissions = append(permissions, "ingestion:run")
 		}
-		send(200, map[string]any{"mode": profile.Mode, "authenticated": true, "permissions": permissions, "api_docs_enabled": false, "user": map[string]any{"actor_id": principal.Actor(), "name": profile.Name, "email": profile.Email, "roles": roles, "role_names": roleNames}})
+		user := map[string]any{"actor_id": principal.Actor(), "name": profile.Name, "email": profile.Email, "roles": roles, "role_names": roleNames}
+		status := map[string]any{"mode": profile.Mode, "authenticated": true, "permissions": permissions, "api_docs_enabled": false, "user": user}
+		if profile.CSRFToken != "" {
+			status["csrf_token"] = profile.CSRFToken
+			user["must_change_password"] = profile.MustChangePassword
+			user["auth_source"] = "local"
+		}
+		send(200, status)
 
 	case "/api/chains/person/coverage":
 		send(200, c.Summary(current))

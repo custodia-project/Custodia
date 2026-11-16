@@ -19,10 +19,32 @@ export const unauthenticated = {
   user: null,
 };
 
-export type MockOptions = { onRequest?: (pathname: string) => void; permissions?: string[]; authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal'; sessionUser?: Record<string, unknown>; userRows?: Record<string, unknown>[]; includeSafe?: boolean; largeInventory?: boolean; decommissionCandidate?: boolean; accountManagementUnavailable?: boolean; initialVisibleWorkspaces?: string[]; initialRecentWorkspaces?: string[]; dashboardWidgets?: Record<string, unknown>[]; latestRun?: Record<string, unknown> | null; apiDocsEnabled?: boolean; netskopeMetrics?: Record<string, unknown> };
+export type MockLocalUser = {
+  username: string;
+  display_name: string;
+  enabled: boolean;
+  administrator: boolean;
+  must_change_password: boolean;
+  last_login_at: string | null;
+  active_sessions: number;
+  connections: string[];
+};
+
+export type MockOptions = { onRequest?: (pathname: string) => void; permissions?: string[]; authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal'; sessionUser?: Record<string, unknown>; userRows?: Record<string, unknown>[]; includeSafe?: boolean; largeInventory?: boolean; decommissionCandidate?: boolean; accountManagementUnavailable?: boolean; initialVisibleWorkspaces?: string[]; initialRecentWorkspaces?: string[]; dashboardWidgets?: Record<string, unknown>[]; latestRun?: Record<string, unknown> | null; apiDocsEnabled?: boolean; netskopeMetrics?: Record<string, unknown>; authenticated?: boolean; localUsers?: MockLocalUser[]; localCredentials?: Record<string, string> };
 
 export function createMockApi(options: MockOptions = {}): (request: MockRequest) => Promise<MockResponse> {
-  const { onRequest, permissions = ['inventory:read', 'inventory:write', 'catalogs:write', 'access:manage', 'safes:read', 'safes:manage', 'coverage:read', 'coverage:manage', 'ingestion:preview', 'ingestion:run', 'findings:manage', 'catalogs:manage'], authMode = 'local', sessionUser = { actor_id: 'operator-1', name: 'Operador', email: 'operator@example.com', roles: ['operator'], role_names: [t('Operador de plataforma')] }, userRows = [{ actor_id: 'carlos@example.com', email: 'carlos@example.com', display_name: 'Carlos Ortiz', is_active: true, must_change_password: false, roles: ['admin'], auth_source: 'local', last_login_at: null }], includeSafe = false, largeInventory = false, decommissionCandidate = false, accountManagementUnavailable = false, initialVisibleWorkspaces = ['safes'], initialRecentWorkspaces = [], dashboardWidgets, latestRun = null, apiDocsEnabled = true, netskopeMetrics = {} } = options;
+  const { onRequest, permissions = ['inventory:read', 'inventory:write', 'catalogs:write', 'access:manage', 'safes:read', 'safes:manage', 'coverage:read', 'coverage:manage', 'ingestion:preview', 'ingestion:run', 'findings:manage', 'catalogs:manage'], authMode = 'local', sessionUser = { actor_id: 'operator-1', name: 'Operador', email: 'operator@example.com', roles: ['operator'], role_names: [t('Operador de plataforma')] }, userRows = [{ actor_id: 'carlos@example.com', email: 'carlos@example.com', display_name: 'Carlos Ortiz', is_active: true, must_change_password: false, roles: ['admin'], auth_source: 'local', last_login_at: null }], includeSafe = false, largeInventory = false, decommissionCandidate = false, accountManagementUnavailable = false, initialVisibleWorkspaces = ['safes'], initialRecentWorkspaces = [], dashboardWidgets, latestRun = null, apiDocsEnabled = true, netskopeMetrics = {}, authenticated = true, localUsers = [{ username: 'ada.admin', display_name: 'Ada Admin', enabled: true, administrator: true, must_change_password: false, last_login_at: '2026-11-15T09:00:00Z', active_sessions: 1, connections: ['acme-identity', 'acme-netskope'] }], localCredentials } = options;
+  // Local-mode demo state: the login, password change and account
+  // administration endpoints below are stateful, so the demo behaves like the
+  // Go handler without a backend. All names and passwords are fictional.
+  const adminUsername = localUsers.find((user) => user.administrator)?.username || 'ada.admin';
+  let signedIn = authenticated;
+  let currentUser: Record<string, unknown> = sessionUser;
+  let csrfToken = 'demo-csrf-token';
+  const credentials = new Map<string, string>(Object.entries(localCredentials ?? { [adminUsername]: 'correct horse battery staple' }));
+  const localAccounts: MockLocalUser[] = localUsers.map((user) => ({ ...user, connections: [...user.connections] }));
+  const currentUsername = () => String(currentUser.actor_id ?? '').startsWith('local:') ? String(currentUser.actor_id).slice('local:'.length) : '';
+  const canManageLocal = () => signedIn && (permissions.includes('access:manage') || permissions.includes('access:local_users_manage'));
   const peopleByEmail = new Map<string, { key: string; email: string; display_name: string; identities: Record<string, unknown>[] }>();
   for (const user of userRows) {
     const email = String(user.email || '');
@@ -572,6 +594,104 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       },
     };
     let responseBody = bodies[pathname] ?? {};
+    let responseStatus = 200;
+    const method = route.request().method();
+    if (pathname === '/api/auth/login' && method === 'POST') {
+      const payload = (route.request().postDataJSON() ?? {}) as { username?: string; email?: string; password?: string };
+      const username = String(payload.username ?? payload.email ?? '').trim().toLowerCase();
+      const account = localAccounts.find((user) => user.username === username);
+      const expected = credentials.get(username);
+      if (!account || expected === undefined || payload.password !== expected) {
+        responseStatus = 401;
+        responseBody = { detail: 'Usuario o contraseña incorrectos.' };
+      } else if (!account.enabled) {
+        responseStatus = 403;
+        responseBody = { detail: 'Tu cuenta no está habilitada en Custodia. Contactá al administrador.' };
+      } else {
+        signedIn = true;
+        currentUser = { actor_id: `local:${account.username}`, name: account.display_name, email: '', roles: [account.administrator ? 'admin' : 'reader'], role_names: [account.administrator ? t('Administrador') : t('Lector')], must_change_password: account.must_change_password, auth_source: 'local' };
+        csrfToken = `demo-csrf-${account.username}`;
+        responseBody = { authenticated: true, csrf_token: csrfToken, must_change_password: account.must_change_password };
+      }
+    }
+    if (pathname === '/api/auth/logout' && method === 'POST') {
+      signedIn = false;
+      currentUser = sessionUser;
+      csrfToken = 'demo-csrf-token';
+      responseBody = { logged_out: true };
+    }
+    if (pathname === '/api/auth/password' && method === 'POST') {
+      const payload = (route.request().postDataJSON() ?? {}) as { current_password?: string; new_password?: string };
+      const username = currentUsername();
+      const expected = credentials.get(username);
+      if (!signedIn || expected === undefined) {
+        responseStatus = 401;
+        responseBody = { detail: 'Iniciá sesión para continuar.' };
+      } else if (payload.current_password !== expected) {
+        responseStatus = 400;
+        responseBody = { detail: 'La contraseña actual no es correcta.' };
+      } else if (String(payload.new_password ?? '').length < 15) {
+        responseStatus = 400;
+        responseBody = { detail: 'La nueva contraseña debe tener al menos 15 caracteres.' };
+      } else {
+        credentials.set(username, String(payload.new_password));
+        const account = localAccounts.find((user) => user.username === username);
+        if (account) account.must_change_password = false;
+        csrfToken = `demo-csrf-${username}-rotated`;
+        currentUser = { ...currentUser, must_change_password: false };
+        responseBody = { changed: true, csrf_token: csrfToken };
+      }
+    }
+    if (pathname === '/api/access/users') {
+      if (!canManageLocal()) {
+        responseStatus = 403;
+        responseBody = { detail: 'Permiso de administración requerido.' };
+      } else if (method === 'GET') {
+        responseBody = { rows: localAccounts };
+      } else if (method === 'POST') {
+        const payload = (route.request().postDataJSON() ?? {}) as { username?: string; display_name?: string; password?: string; connections?: string[] };
+        const username = String(payload.username ?? '').trim().toLowerCase();
+        if (!/^[a-z0-9][a-z0-9._@-]{0,127}$/.test(username) || !String(payload.display_name ?? '').trim() || String(payload.password ?? '').length < 15) {
+          responseStatus = 400;
+          responseBody = { detail: 'Datos de usuario inválidos.' };
+        } else if (localAccounts.some((user) => user.username === username)) {
+          responseStatus = 409;
+          responseBody = { detail: 'Ese usuario ya existe.' };
+        } else {
+          localAccounts.push({ username, display_name: String(payload.display_name).trim(), enabled: true, administrator: false, must_change_password: true, last_login_at: null, active_sessions: 0, connections: payload.connections ?? [] });
+          credentials.set(username, String(payload.password));
+          responseStatus = 201;
+          responseBody = { username, must_change_password: true };
+        }
+      }
+    }
+    if (pathname.startsWith('/api/access/users/') && method === 'POST') {
+      const action = pathname.slice('/api/access/users/'.length);
+      const payload = (route.request().postDataJSON() ?? {}) as { username?: string };
+      const target = localAccounts.find((user) => user.username === String(payload.username ?? '').trim().toLowerCase());
+      const self = Boolean(target && target.username === currentUsername());
+      const forbidden = Boolean(target && (target.administrator ? action !== 'revoke-sessions' || !self : action !== 'revoke-sessions' && self));
+      if (!canManageLocal() || !target || forbidden) {
+        responseStatus = 403;
+        responseBody = { detail: 'La operación excede tu alcance de administración.' };
+      } else if (action === 'disable') {
+        target.enabled = false;
+        target.active_sessions = 0;
+        responseStatus = 204;
+        responseBody = {};
+      } else if (action === 'enable') {
+        target.enabled = true;
+        responseStatus = 204;
+        responseBody = {};
+      } else if (action === 'revoke-sessions') {
+        target.active_sessions = 0;
+        responseStatus = 204;
+        responseBody = {};
+      } else {
+        responseStatus = 404;
+        responseBody = { detail: 'Operación no disponible.' };
+      }
+    }
     const offset = Number(requestUrl.searchParams.get('offset') || 0);
     if (pathname === '/api/cmdb/identity-users/31/pam-chain') {
       responseBody = { ...(bodies['/api/cmdb/pam-users/8/chain'] as Record<string, unknown>), match_basis: 'email', status: 'matched' };
@@ -711,7 +831,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
       responseBody = workspacePreferences;
     }
     await route.fulfill({
-      status: 200,
+      status: responseStatus,
       contentType: 'application/json',
       body: JSON.stringify(responseBody),
     });

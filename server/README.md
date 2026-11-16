@@ -333,6 +333,40 @@ al límite y el cuerpo mayor a 1 MiB se rechazan. Límites por conexión: págin
 una página deja una corrida parcial, mientras que un error de integridad o de
 la primera página no publica observaciones.
 
+## Login local (modo base)
+
+`serve` exige `--auth-mode local` o `--auth-mode ozal`; no hay valor por
+defecto ni fallback. El modo local usa
+[golang.org/x/crypto/argon2](https://pkg.go.dev/golang.org/x/crypto/argon2)
+v0.57.0 (BSD-3-Clause) para las contraseñas. Contrato completo en
+[ACCESS.md](../docs/ACCESS.md#modo-local-contrato).
+
+```sh
+/tmp/custodia init --dir /ruta/nueva/custodia-data
+umask 077; read -rs P; printf '%s\n' "$P" > /ruta/privada/admin.password; unset P
+/tmp/custodia create-admin --dir /ruta/nueva/custodia-data --username ada.admin --display-name "Ada Admin" --password-file /ruta/privada/admin.password
+shred -u /ruta/privada/admin.password
+/tmp/custodia serve --auth-mode local --public-origin https://custodia.acme.example --dir /ruta/nueva/custodia-data --web-dir /ruta/al/build/web
+```
+
+La contraseña se lee de la primera línea de `--password-file` (archivo regular
+sin permisos de grupo ni otros) o de la entrada estándar si no es una terminal;
+nunca de un argumento. `create-admin` funciona una sola vez. Recuperación desde
+el host, auditada, que deja una contraseña temporal y revoca sesiones:
+
+```sh
+/tmp/custodia reset-password --dir /ruta/nueva/custodia-data --username ada.admin --password-file /ruta/privada/temporal.password
+```
+
+`--public-origin` es el origen exacto que ve el navegador (HTTPS; HTTP sólo en
+IP numérica loopback para pruebas). El proxy TLS delante de Custodia debe
+preservar el header Origin. Detrás de un proxy, el límite por IP cuenta la IP
+del proxy. La administración mínima de cuentas está en `/api/access/users` y en
+la vista «Usuarios y permisos» de la interfaz. `npm run verify:go:local`
+construye el binario y la web, crea el administrador con la contraseña por
+stdin y recorre en Chromium login, contraseña temporal y revocación por
+deshabilitado, sin mocks ni respuestas interceptadas.
+
 ## Identidad de Ozal y primer administrador
 
 El receptor usa github.com/go-jose/go-jose/v4 v4.1.9 (Apache 2.0).
@@ -349,7 +383,7 @@ con la de su ruta. TLS y login son responsabilidad del gateway.
 ```sh
 /tmp/custodia init --dir /ruta/nueva/custodia-data
 /tmp/custodia bootstrap-admin --dir /ruta/nueva/custodia-data --gateway-config /ruta/gateway.json --subject SUJETO_OPACO_CONFIRMADO
-/tmp/custodia serve --dir /ruta/nueva/custodia-data --gateway-config /ruta/gateway.json --web-dir /ruta/al/build/web
+/tmp/custodia serve --auth-mode ozal --dir /ruta/nueva/custodia-data --gateway-config /ruta/gateway.json --web-dir /ruta/al/build/web
 ```
 
 init crea una base vacía, sin cuentas ni fuentes. El primer administrador puede

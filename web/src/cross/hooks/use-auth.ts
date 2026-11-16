@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { api, logout } from '../lib/api';
+import { api, logout, setCSRFToken } from '../lib/api';
 import { errorDetailsFrom, type ErrorDetails } from '../lib/error-details';
 import { passwordRequirements } from '../lib/password-policy';
 import type { AuthStatus } from '../types/auth';
@@ -43,10 +43,12 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     setAuthErrorDetails(null);
     try {
       const status = await api<AuthStatus>('/auth/status', { signal });
+      setCSRFToken(status.csrf_token);
       setAuthStatus(status);
       setAuthChecked(true);
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) return;
+      setCSRFToken('');
       setAuthStatus(null);
       setAuthError(error instanceof Error ? error.message : t('No se pudo comprobar la sesión'));
       setAuthErrorDetails(errorDetailsFrom(error, t('No se pudo comprobar la sesión')));
@@ -65,6 +67,7 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     let timeoutId: number;
     const handleIdle = async () => {
       const loggedOut = await logout();
+      setCSRFToken('');
       setAuthStatus((current) => current ? { ...current, authenticated: false, user: null } : current);
       setAuthMessage(loggedOut
         ? t('Tu sesión venció por inactividad. Volvé a entrar.')
@@ -117,19 +120,28 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
   const submitLogin = async (event: FormEvent) => {
     event.preventDefault();
     if (!loginEmail.trim() || !loginPassword) {
-      onError(t('Completá email y contraseña.'));
+      onError(t('Completá usuario y contraseña.'));
       return;
     }
     setLoginBusy(true);
     onError('');
     try {
-      await api('/auth/login', { method: 'POST', body: JSON.stringify({ email: loginEmail, password: loginPassword }) });
+      const local = authStatus?.mode === 'local';
+      const login = await api<{ csrf_token?: string }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(local
+          ? { username: loginEmail.trim(), password: loginPassword }
+          : { email: loginEmail, password: loginPassword }),
+      });
+      setCSRFToken(login.csrf_token);
       setLoginPassword('');
       if (window.location.pathname === LOCAL_LOGIN_PATH) {
         window.history.replaceState(null, '', '/');
         window.dispatchEvent(new PopStateEvent('popstate'));
       }
-      setAuthStatus(await api<AuthStatus>('/auth/status'));
+      const status = await api<AuthStatus>('/auth/status');
+      setCSRFToken(status.csrf_token);
+      setAuthStatus(status);
     } catch (error) {
       onError(error instanceof Error ? error.message : t('No se pudo iniciar sesión'));
     } finally {
@@ -155,11 +167,14 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     setPasswordChangeBusy(true);
     onError('');
     try {
-      await api('/auth/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+      const changed = await api<{ csrf_token?: string }>('/auth/password', { method: 'POST', body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+      setCSRFToken(changed.csrf_token);
       setCurrentPassword('');
       setNewPassword('');
       setNewPasswordConfirm('');
-      setAuthStatus(await api<AuthStatus>('/auth/status'));
+      const status = await api<AuthStatus>('/auth/status');
+      setCSRFToken(status.csrf_token);
+      setAuthStatus(status);
       onNotice(t('Contraseña actualizada. Ya podés ingresar al inventario.'));
     } catch (error) {
       onError(error instanceof Error ? error.message : t('No se pudo actualizar la contraseña'));

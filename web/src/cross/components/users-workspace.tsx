@@ -1,4 +1,5 @@
 import { UserAdmin } from './user-admin';
+import { LocalUsersAdmin } from './local-users-admin';
 import { AccessReview } from './access-review';
 import { RoleAdmin } from './role-admin';
 import { useEffect, useState } from 'react';
@@ -20,8 +21,14 @@ type AccessView = 'users' | 'review' | 'roles';
 
 export function UsersWorkspace(props: UsersWorkspaceProps) {
   const has = (permission: string) => props.permissions.includes('access:manage') || props.permissions.includes(permission);
+  // Go local mode announces only its own administration scope; the legacy
+  // directory/role APIs it does not implement stay hidden there. The static
+  // demo and other modes keep the existing workspace.
+  const localAccountsMode = props.authMode === 'local' && has('access:local_users_manage')
+    && !has('access:manage') && !has('access:directory_read') && !has('access:role_assignments_manage');
   const canSeeUsers = has('access:directory_read') || has('access:local_users_manage') || has('access:role_assignments_manage');
-  const canSeeRoles = has('access:roles_read') || has('access:roles_manage') || has('access:permissions_manage') || has('access:oidc_mappings_read');
+  const canSeeReview = !localAccountsMode && canSeeUsers;
+  const canSeeRoles = !localAccountsMode && (has('access:roles_read') || has('access:roles_manage') || has('access:permissions_manage') || has('access:oidc_mappings_read'));
   const [view, setView] = useState<AccessView>(() => canSeeUsers ? 'users' : 'roles');
   useEffect(() => {
     if ((view === 'users' || view === 'review') && !canSeeUsers && canSeeRoles) setView('roles');
@@ -30,11 +37,11 @@ export function UsersWorkspace(props: UsersWorkspaceProps) {
   return <div className="access-workspace">
     <nav className="access-tabs" aria-label={t('Administración de acceso')} role="tablist" onKeyDown={handleTablistKeyDown}>
       {canSeeUsers && <button id="access-tab-users" aria-controls="access-tabpanel" className={view === 'users' ? 'active' : ''} type="button" role="tab" aria-selected={view === 'users'} tabIndex={view === 'users' ? 0 : -1} onClick={() => setView('users')}><UsersRound size={16} /><span><strong>{t('Usuarios de Custodia')}</strong><small>{t('Identidades locales y Okta')}</small></span></button>}
-      {canSeeUsers && <button id="access-tab-review" aria-controls="access-tabpanel" className={view === 'review' ? 'active' : ''} type="button" role="tab" aria-selected={view === 'review'} tabIndex={view === 'review' ? 0 : -1} onClick={() => setView('review')}><ClipboardCheck size={16} /><span><strong>{t('Revisión de accesos')}</strong><small>{t('Quién tiene qué y desde cuándo')}</small></span></button>}
+      {canSeeReview && <button id="access-tab-review" aria-controls="access-tabpanel" className={view === 'review' ? 'active' : ''} type="button" role="tab" aria-selected={view === 'review'} tabIndex={view === 'review' ? 0 : -1} onClick={() => setView('review')}><ClipboardCheck size={16} /><span><strong>{t('Revisión de accesos')}</strong><small>{t('Quién tiene qué y desde cuándo')}</small></span></button>}
       {canSeeRoles && <button id="access-tab-roles" aria-controls="access-tabpanel" className={view === 'roles' ? 'active' : ''} type="button" role="tab" aria-selected={view === 'roles'} tabIndex={view === 'roles' ? 0 : -1} onClick={() => setView('roles')}><ShieldCheck size={16} /><span><strong>{t('Roles y permisos')}</strong><small>{t('Alcance efectivo por producto')}</small></span></button>}
     </nav>
     <div role="tabpanel" id="access-tabpanel" aria-labelledby={`access-tab-${view}`}>
-      {view === 'users' && canSeeUsers ? <UserAdmin {...props} /> : view === 'review' && canSeeUsers ? <AccessReview /> : view === 'roles' && canSeeRoles ? <RoleAdmin permissions={props.permissions} currentActorId={props.currentActorId} onNotice={props.onNotice} onError={props.onError} /> : null}
+      {view === 'users' && canSeeUsers ? (localAccountsMode ? <LocalUsersAdmin onNotice={props.onNotice} onError={props.onError} /> : <UserAdmin {...props} />) : view === 'review' && canSeeReview ? <AccessReview /> : view === 'roles' && canSeeRoles ? <RoleAdmin permissions={props.permissions} currentActorId={props.currentActorId} onNotice={props.onNotice} onError={props.onError} /> : null}
     </div>
   </div>;
 }

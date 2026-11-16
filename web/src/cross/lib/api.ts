@@ -19,6 +19,21 @@ export class ApiError extends Error {
   }
 }
 
+/* Local mode binds every mutation to the CSRF token of the current session.
+   It lives only in memory: /api/auth/status and the login/password responses
+   hand it back and it changes whenever the session rotates. */
+let csrfToken = '';
+
+export function setCSRFToken(token: string | null | undefined): void {
+  csrfToken = token?.trim() ?? '';
+}
+
+function isMutation(method: string | undefined): boolean {
+  const normalized = (method ?? 'GET').toUpperCase();
+  return normalized !== 'GET' && normalized !== 'HEAD';
+}
+
+
 function apiErrorMessage(detail: unknown, fallback: string): string {
   if (typeof detail === 'string' && detail.trim()) return detail.trim();
   if (Array.isArray(detail)) {
@@ -59,19 +74,20 @@ function usableRawDetail(raw: string): string {
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
+  const headers = new Headers(options?.headers);
+  if (!(options?.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (isMutation(options?.method) && csrfToken) headers.set('X-Custodia-CSRF', csrfToken);
   try {
     response = await fetch(`${API_URL}${path}`, {
-      credentials: 'include',
-      headers: {
-        ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(options?.headers || {}),
-      },
       ...options,
+      credentials: 'include',
+      headers,
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError(messageForStatus(0), 0, path, null);
   }
+  if (response.status === 204) return undefined as T;
   const raw = await response.text();
   let data: { detail?: unknown };
   try {
@@ -86,7 +102,11 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
 export async function logout(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+    const response = await fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: csrfToken ? { 'X-Custodia-CSRF': csrfToken } : undefined,
+    });
     if (response.ok && response.headers.get('Content-Type')?.includes('application/json')) {
       const result = await response.json().catch(() => null) as { gateway_logout?: boolean } | null;
       if (result?.gateway_logout === true) {

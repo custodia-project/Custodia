@@ -4,29 +4,38 @@ dueño: Octavio Santacruz
 revisado: 2026-11-16
 ---
 
-# Acceso: Ozal, autorización y pruebas
+# Acceso: login local, Ozal, autorización y pruebas
 
-El backend Go implementa un receptor de identidad firmada de Ozal por
-petición. El alta inicial del administrador es un comando explícito en el
-host. La integración se verifica con claves efímeras y un gateway de prueba;
-la aceptación contra una instancia real de Ozal y su despliegue siguen pendientes.
-OIDC genérico todavía es un diseño, no otro modo disponible.
+El modo base del producto es el login local con usuario y contraseña, con
+sesión revocable en servidor (contrato abajo). El receptor de identidad
+firmada de Ozal sigue disponible como integración opcional. El administrador
+elige el modo al arrancar `serve`; nunca hay fallback automático entre modos.
+El alta inicial del administrador es siempre un comando explícito en el host.
+La integración Ozal se verifica con claves efímeras y un gateway de prueba;
+la aceptación contra una instancia real de Ozal, la aceptación desplegada del
+modo local con TLS/proxy y los despliegues siguen pendientes. OIDC genérico
+todavía es un diseño, no otro modo disponible.
 
 ## Modos separados
 
 | Contexto | Entrada | Autoridad de Custodia |
 |---|---|---|
 | Demo pública | Sin login, datos sintéticos. | Ningún acceso a inventario privado. |
-| `serve` detrás de Ozal | Aserción firmada nueva para cada petición, también assets. | Principales habilitados, permisos por conexión y auditoría. |
+| `serve --auth-mode local` | Cookie de sesión emitida tras usuario y contraseña. | Cuentas locales habilitadas, permisos por conexión y auditoría. |
+| `serve --auth-mode ozal` | Aserción firmada nueva para cada petición, también assets. | Principales habilitados, permisos por conexión y auditoría. |
 | `serve-lab` | Bearer aleatorio de laboratorio, sólo loopback. | Principales sintéticos y concesiones explícitas. |
 
-Ambos servidores escuchan sólo en IP numérica loopback. Eso no autentica al
-usuario: serve exige la firma incluso con acceso directo. No admite token de
-laboratorio, cookie de aplicación, headers de usuario/email ni login local.
-No hay fallback cuando falla Ozal. La instalación debe cerrar también los
-caminos directos al backend y proteger su host.
+Todos los servidores escuchan sólo en IP numérica loopback. Eso no autentica
+al usuario. `--auth-mode` es obligatorio en serve y admite exactamente
+`local` u `ozal`; no hay modo híbrido ni valor por defecto. En modo `ozal`
+se exige la firma incluso con acceso directo y no se admite token de
+laboratorio, cookie de sesión local, headers de usuario/email ni login local.
+En modo `local` no se registra el receptor Ozal: una aserción, un bearer o
+un header de usuario no autentican; sólo la cookie de sesión. Cuando falla
+un modo, la petición se rechaza; no se prueba el otro. La instalación debe
+cerrar también los caminos directos al backend y proteger su host.
 
-## Contrato firmado
+## Modo `ozal`: contrato firmado
 
 Se contrastó el receptor con docs/reference.md del checkout vecino de Ozal.
 Ozal autentica al visitante, aplica su política y reemplaza los headers de
@@ -52,7 +61,7 @@ claves públicas; la rotación carga temporalmente vieja y nueva, reinicia,
 cambia el emisor y luego retira la vieja/reinicia. La revocación de una clave
 requiere retirarla y reiniciar todos los procesos que la cargaron.
 
-## Primer administrador y lectores
+## Modo `ozal`: primer administrador y lectores
 
 init crea una base privada vacía: no inventario demo, usuario, contraseña ni
 token. bootstrap-admin toma la configuración del emisor, un sub confirmado
@@ -80,7 +89,7 @@ Las búsquedas, fichas y conexiones se filtran antes de correlacionar.
 Cobertura requiere permiso sobre ambas fuentes y la regla explícita del par.
 El sync, jobs, exportaciones y su autorización siguen pendientes.
 
-## Cierre de sesión
+## Modo `ozal`: cierre de sesión
 
 POST /api/auth/logout valida identidad y Origin; devuelve gateway_logout.
 El frontend envía un formulario POST al path fijo del mismo origen
@@ -137,16 +146,129 @@ y [OAuth Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.
 Seleccionar una librería Go mantenida al implementar; no escribir verificación
 criptográfica ni un protocolo OAuth a mano.
 
-## Login local de QA
+## Modo `local`: contrato
 
-La versión anterior tiene un endpoint local condicionado por su modo de
-autenticación. No se probó la configuración que está corriendo. Ocultar el
-botón no establece que el endpoint esté deshabilitado.
+Selección. `serve --auth-mode local --public-origin ORIGEN`. ORIGEN sigue la
+regla de public_origin de Ozal: HTTPS sin ruta, usuario, query ni fragmento;
+HTTP sólo en IP numérica loopback para el harness. El modo local rechaza
+`--gateway-config` y el modo ozal rechaza `--public-origin`. Cambiar de modo
+es reiniciar el proceso con otro valor; las cuentas de cada modo viven en
+emisores distintos (`custodia-local` frente al issuer de Ozal) y nunca se
+enlazan entre sí, ni por email ni por nombre.
+
+Cuentas. Una cuenta local es un principal con emisor `custodia-local` y
+sujeto igual al nombre de usuario normalizado: minúsculas, 1 a 128
+caracteres de `a-z 0-9 . _ @ -`, empezando por letra o dígito. Reutiliza
+habilitación, rol administrador, concesiones por conexión y auditoría de los
+principales existentes. No hay registro abierto, primer visitante
+administrador ni credenciales por defecto: `init` crea una base sin cuentas.
+
+Contraseñas. Entre 15 y 256 caracteres, sin reglas de composición; distinta
+del usuario y de la contraseña anterior. Se guardan sólo como argon2id
+(`golang.org/x/crypto/argon2`) en formato PHC con versión 19, memoria
+64 MiB, 3 iteraciones, paralelismo 2, sal aleatoria de 16 bytes y salida de
+32 bytes. La verificación compara en tiempo constante y rechaza hashes con
+parámetros fuera de rango. Un usuario inexistente consume el mismo cálculo
+contra un hash ficticio. Hay como máximo cuatro cálculos simultáneos por
+proceso. La contraseña nunca se registra, audita, devuelve ni se acepta como
+argumento de línea de comandos.
+
+Sesión. Login exitoso crea un token aleatorio de 32 bytes; SQLite guarda sólo
+su SHA-256, el principal, creación, última actividad y vencimiento. Cookie
+`__Host-custodia_session` (o `custodia_session` con origen HTTP loopback) con
+`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, sin dominio ni Max-Age.
+Expiración absoluta 12 horas e inactividad 30 minutos, verificadas en el
+servidor en cada petición; la actividad se registra con resolución de un
+minuto. Cada login y cambio de contraseña emite un token nuevo; el reseteo por
+host revoca todas las sesiones y el siguiente login con la contraseña temporal
+emite el token nuevo. Deshabilitar la cuenta, resetear o cambiar la contraseña,
+el logout y la revocación administrativa borran las sesiones afectadas en la
+misma transacción. Una sesión ausente, vencida o revocada da 401.
+
+CSRF. Toda petición distinta de GET/HEAD exige un único Origin exactamente
+igual a ORIGEN, sin confiar en Host ni X-Forwarded-*. Con sesión, además, el
+header `X-Custodia-CSRF` debe coincidir con el token CSRF de la sesión
+(derivado del token de sesión con SHA-256 y comparado en tiempo constante).
+`/api/auth/status` y el login devuelven ese token; el navegador no lo guarda
+fuera de memoria. Falta o error de Origin/CSRF da 403 sin efectos.
+
+Login. `POST /api/auth/login` con JSON `{username,password}`, cuerpo máximo
+8 KiB y campos desconocidos rechazados. Usuario inexistente y contraseña
+incorrecta dan el mismo 401 «Usuario o contraseña incorrectos.». Una cuenta
+deshabilitada con contraseña correcta da 403. Antes de calcular el hash se
+consultan dos límites persistidos en SQLite: 5 fallos por usuario o 50 por
+IP del socket en 15 minutos bloquean esa clave 15 minutos con 429; el
+bloqueo aplica también a usuarios inexistentes, por lo que no los revela.
+Detrás de un proxy en loopback la IP es la del proxy y su límite actúa como
+freno global. Un login exitoso limpia el contador del usuario. Si la tabla de
+intentos llega a 65.536 claves vigentes, el login falla cerrado con 429.
+
+Estado. `GET /api/auth/status` sin sesión válida responde 200 con
+`authenticated:false`, `mode:"local"` y sin permisos; con sesión, el mismo
+contrato que Ozal más `csrf_token` y `user.must_change_password`. Una cuenta
+con contraseña temporal sólo puede consultar estado, cambiar la contraseña y
+cerrar sesión; el resto de la API da 403. Los assets de la interfaz se
+sirven sin sesión porque no contienen datos; las rutas `/api/` que no son
+`/api/auth/status` ni el login exigen sesión. El administrador local anuncia
+`access:local_users_manage` para la vista mínima de cuentas.
+
+Cambio de contraseña. `POST /api/auth/password` con
+`{current_password,new_password}` y CSRF. Verifica la actual (los fallos
+cuentan para el límite del usuario), aplica la política, reemplaza el hash
+condicionado al anterior, quita la marca temporal, revoca todas las sesiones
+de la cuenta y emite una nueva para el navegador que hizo el cambio.
+
+Logout. `POST /api/auth/logout` con CSRF borra la sesión, expira la cookie y
+responde `{"logged_out":true}`; nunca `gateway_logout`.
+
+Administración mínima (sólo administrador local, CSRF, auditada en la misma
+transacción, sin contraseñas en auditoría ni respuestas):
+
+- `GET /api/access/users`: cuentas locales con estado, rol, marca temporal,
+  último login, sesiones activas y conexiones concedidas.
+- `POST /api/access/users` con `{username,display_name,password,connections}`:
+  crea un lector con una contraseña temporal elegida por el administrador y
+  entregada fuera de banda; las conexiones deben ser un subconjunto de las
+  del administrador. Un usuario existente falla sin cambios.
+- `POST /api/access/users/disable` y `/enable` con `{username}`: sólo
+  lectores cuyo alcance completo administra; deshabilitar revoca sesiones.
+  No permite deshabilitar administradores ni a sí mismo.
+- `POST /api/access/users/revoke-sessions` con `{username}`: lectores en su
+  alcance o la propia cuenta.
+
+Las concesiones por conexión son las existentes; esta API no las edita
+después del alta. El administrador local anuncia `access:local_users_manage`
+(capacidad de interfaz, no una concesión de fuente) para la vista mínima de
+cuentas, que no usa el directorio ni los roles heredados. Roles adicionales,
+edición de concesiones y reseteo de contraseña ajena desde la consola quedan
+pendientes.
+
+Host. `create-admin --dir D --username U --display-name N [--connections
+a,b] [--password-file F]` crea el primer administrador local una sola vez
+(marcador persistido), atómico con su auditoría. `reset-password --dir D
+--username U [--password-file F]` es la recuperación: fija una contraseña
+temporal, revoca sesiones, limpia el bloqueo del usuario y audita con actor
+`host`; no cambia la habilitación. Ambos leen la contraseña de la primera
+línea de F (archivo regular, no legible por grupo ni otros) o de la entrada
+estándar; nunca de un argumento.
+
+Validación: pruebas Go con login correcto e incorrecto, mensaje idéntico para
+usuario inexistente, cuenta deshabilitada, sesión revocada, expiración
+absoluta e inactividad, Origin y CSRF ausentes, límite de intentos, contraseña
+temporal, cambio de contraseña, administración y su alcance, ausencia de la
+contraseña en respuestas, auditoría y salida, y rechazo cruzado de aserciones
+Ozal y cookies locales entre modos. Una prueba de integración crea el admin por
+CLI con la contraseña por entrada estándar y recorre login, cookie, CSRF,
+temporales, revocación, cambio de contraseña y logout por HTTP real; las
+pruebas unitarias de la web cubren el encabezado CSRF y la API simulada de la
+demo. `verify:go:local` repite el recorrido en Chromium contra Go y SQLite:
+error genérico, login, creación de un lector, cambio de contraseña temporal y
+deshabilitado con revocación de la sesión viva. Falta la aceptación desplegada
+con TLS/proxy.
+
+## QA sin login real
 
 En el producto nuevo, las pruebas automatizadas pueden inyectar un proveedor
-de identidad falso desde el harness. Para QA manual, si hace falta un login
-local, usar un modo `local-dev` explícito, datos ficticios y escucha loopback;
-rechazar su arranque fuera del entorno de desarrollo. En los modos reales no
-se registra ese endpoint y no se distribuyen credenciales predeterminadas.
-Probar peticiones directas al endpoint y el rechazo de configuración inválida,
-además de la UI. Este diseño no añade una cuenta de emergencia productiva.
+de identidad falso desde el harness. El laboratorio sintético cubre QA
+manual con datos ficticios en loopback. No hay cuenta de emergencia
+productiva ni credenciales predeterminadas.

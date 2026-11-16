@@ -63,7 +63,7 @@ try{
  await writeFile(config,JSON.stringify({issuer,audience,public_origin:base,public_key_files:[key]}));
  execFileSync(binary,['bootstrap-admin','--dir',data,'--gateway-config',config,'--subject','opaque-admin','--connections','acme-identity,acme-netskope'],{stdio:'pipe'});
  async function start(){
-  backend=spawn(binary,['serve','--dir',data,'--gateway-config',config,'--web-dir',web,'--listen',`127.0.0.1:${backendPort}`],{stdio:['ignore','pipe','pipe']});
+  backend=spawn(binary,['serve','--auth-mode','ozal','--dir',data,'--gateway-config',config,'--web-dir',web,'--listen',`127.0.0.1:${backendPort}`],{stdio:['ignore','pipe','pipe']});
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Backend startup timed out')),10000);backend.stdout.once('data',()=>{clearTimeout(timer);resolve();});backend.once('exit',code=>{clearTimeout(timer);reject(Error(`Backend exited ${code}`));});});
  }
  // A tenant PAM fixture over TLS: the administrator connects it from the UI

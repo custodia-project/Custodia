@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.9
+	golang.org/x/crypto v0.57.0
 	modernc.org/sqlite v1.60.1
 )
 

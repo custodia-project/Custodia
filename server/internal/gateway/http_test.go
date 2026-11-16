@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"custodia/server/internal/lab"
+	"custodia/server/internal/localauth"
 )
 
 func TestGatewayAuthorizationLifecycle(t *testing.T) {
@@ -146,5 +147,60 @@ func TestGatewayAuthorizationLifecycle(t *testing.T) {
 	var entry map[string]any
 	if json.Unmarshal(audit, &entry) != nil || entry["subject"] != "opaque-reader" {
 		t.Fatal("missing administrative audit")
+	}
+}
+
+// Ozal mode never accepts a local session cookie, even a live one, and local
+// accounts never resolve as Ozal principals.
+func TestOzalModeRejectsLocalSessions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	pub, key := testKeys(t)
+	s, err := lab.Open(filepath.Join(t.TempDir(), "gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	if err = s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Seed(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.CreateLocalAdministrator(ctx, "opaque-admin", "Local Admin", "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g", []string{lab.IdentityConnection}, now); err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.LocalCredential(ctx, "opaque-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.Repeat("A", 43)
+	if err = s.StartLocalSession(ctx, local.Principal, localauth.TokenHash(token), now, now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{Issuer: "https://login.acme.example", Audience: "custodia", PublicOrigin: "https://custodia.acme.example", Keys: map[string]ed25519.PublicKey{KeyID(pub): pub}}
+	h, err := NewHandler(s, cfg, func() time.Time { return now }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"custodia_session", "__Host-custodia_session"} {
+		r := httptest.NewRequest("GET", "/api/auth/status", nil)
+		r.AddCookie(&http.Cookie{Name: name, Value: token})
+		r.Header.Set(localauth.CSRFHeader, localauth.CSRFToken(token))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 401 {
+			t.Fatal("Ozal mode accepted a local session", name, w.Code)
+		}
+	}
+	// A signed assertion for the same subject is not the local account.
+	claims := testClaims(now)
+	claims.Subject = "opaque-admin"
+	r := httptest.NewRequest("GET", "/api/auth/status", nil)
+	r.Header.Set("X-Ozal-Assertion", signClaims(t, key, claims))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("local account resolved as Ozal principal", w.Code)
 	}
 }

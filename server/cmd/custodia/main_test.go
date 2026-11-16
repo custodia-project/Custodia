@@ -261,3 +261,86 @@ func TestEmptyInstallationHasNoLaboratoryFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalAccountCommands(t *testing.T) {
+	old := os.Args
+	defer func() { os.Args = old }()
+	base := t.TempDir()
+	dir := filepath.Join(base, "installation")
+	command := func(args ...string) error { os.Args = append([]string{"custodia"}, args...); return run() }
+	if err := command("init", "--dir", dir); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(base, "admin.password")
+	const password = "first admin passphrase on host"
+	if err := os.WriteFile(secret, []byte(password+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := command("create-admin", "--dir", dir, "--username", "ada.admin", "--display-name", "Ada", "--password-file", secret); err == nil {
+		t.Fatal("group-readable password file accepted")
+	}
+	os.Chmod(secret, 0600)
+	if err := command("create-admin", "--dir", dir, "--username", "ada.admin", "--display-name", "Ada", "--password-file", secret, "--auth-mode", "local"); err == nil {
+		t.Fatal("account command accepted --auth-mode")
+	}
+	if err := command("create-admin", "--dir", dir, "--username", "Bad Name", "--display-name", "Ada", "--password-file", secret); err == nil {
+		t.Fatal("invalid username accepted")
+	}
+	if err := command("create-admin", "--dir", dir, "--username", "ada.admin", "--display-name", "Ada", "--password-file", secret, "--connections", "missing"); err == nil {
+		t.Fatal("unknown connection accepted")
+	}
+	if err := command("create-admin", "--dir", dir, "--username", "ada.admin", "--display-name", "Ada", "--password-file", secret); err != nil {
+		t.Fatal(err)
+	}
+	if err := command("create-admin", "--dir", dir, "--username", "other.admin", "--display-name", "Other", "--password-file", secret); err == nil {
+		t.Fatal("second bootstrap accepted")
+	}
+	weak := filepath.Join(base, "weak.password")
+	os.WriteFile(weak, []byte("short\n"), 0600)
+	if err := command("reset-password", "--dir", dir, "--username", "ada.admin", "--password-file", weak); err == nil {
+		t.Fatal("weak reset password accepted")
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.WriteString("recovered host passphrase\n")
+	writer.Close()
+	piped, err := readPassword("", reader)
+	if err != nil || piped != "recovered host passphrase" {
+		t.Fatal("stdin password", piped, err)
+	}
+	if err := command("reset-password", "--dir", dir, "--username", "ada.admin", "--password-file", secret); err != nil {
+		t.Fatal(err)
+	}
+	if err := command("reset-password", "--dir", dir, "--username", "nobody", "--password-file", secret); err == nil {
+		t.Fatal("reset invented an account")
+	}
+	s, err := lab.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	var leaked int
+	if err = s.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE after_json LIKE ? OR before_json LIKE ?", "%"+password+"%", "%"+password+"%").Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatal("password reached the audit log", leaked, err)
+	}
+	var actions int
+	if err = s.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE actor='host' AND action IN ('create_local_administrator','reset_local_password')").Scan(&actions); err != nil || actions != 2 {
+		t.Fatal("host operations not audited", actions, err)
+	}
+	for _, args := range [][]string{
+		{"serve", "--dir", dir},
+		{"serve", "--dir", dir, "--auth-mode", "hybrid"},
+		{"serve", "--dir", dir, "--auth-mode", "local"},
+		{"serve", "--dir", dir, "--auth-mode", "local", "--public-origin", "http://custodia.acme.example"},
+		{"serve", "--dir", dir, "--auth-mode", "local", "--public-origin", "https://custodia.acme.example", "--gateway-config", "gateway.json"},
+		{"serve", "--dir", dir, "--auth-mode", "ozal", "--public-origin", "https://custodia.acme.example"},
+		{"serve", "--dir", dir, "--auth-mode", "ozal"},
+		{"serve-lab", "--dir", dir, "--auth-mode", "local"},
+	} {
+		if err := command(args...); err == nil {
+			t.Fatal("serve accepted an implicit or mixed mode", args)
+		}
+	}
+}

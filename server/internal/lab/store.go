@@ -125,6 +125,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = migrateConnectionGroups(ctx, tx); err != nil {
 		return err
 	}
+	if err = migrateLocalAuth(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
