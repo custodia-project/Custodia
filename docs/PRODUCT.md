@@ -69,6 +69,11 @@ No se decide una licencia ni una apertura del repositorio por esta revisión.
 
 ## Cómo leer esta base
 
+La [revisión de instalación, acceso y MVP](PRODUCT-REVIEW.md) contrasta estos
+contratos con el código al 16/11 y propone un recorrido mínimo completo.
+Sus cambios de alcance y prioridad requieren decisión del dueño; no sustituyen
+las decisiones vigentes ni acreditan implementación.
+
 | Necesidad | Documento |
 |---|---|
 | Entender qué hay hoy y qué aprovechar | [Revisión del checkout](REFERENCE.md) |

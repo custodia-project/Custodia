@@ -17,6 +17,20 @@ Nunca copiar datos del empleador de origen: dominios, nombres de empresas o
 grupos, hosts, remotos ni credenciales. La demo y las pruebas usan sólo
 nombres ficticios (`acme.example`, Globex, Initech).
 
+## Dirección corregida por el dueño — 16/11
+
+- Acceso: login local con usuario y contraseña es el modo base del producto.
+  OIDC se configura opcionalmente desde la consola de administración. Ozal
+  es una integración posible (vía OIDC o su adaptador), no un requisito.
+  Un modo es explícito y elegido por el administrador; nunca hay fallback
+  automático entre modos. Prioridad: implementar este acceso.
+- MVP: inventario de herramientas de seguridad integradas y métricas sobre
+  cada una, que crecen a medida que las empresas habilitan sus APIs y
+  endpoints. No hay «población Identity» como concepto del MVP.
+- Foco: organizar y construir integraciones. Cruces entre herramientas
+  quedan para después del inventario y las métricas.
+- Esto reemplaza la propuesta de MVP y acceso de docs/PRODUCT-REVIEW.md.
+
 Los flujos y reglas de `/home/saint/projects/Custodia` siguen siendo
 referencia de contratos: leer docs/EXISTING-PRODUCT.md.
 Custodia inventaría herramientas de ciberseguridad (Netskope, CyberArk,
