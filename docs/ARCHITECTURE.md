@@ -54,7 +54,7 @@ definen interfaces pequeñas; adaptadores resuelven SQLite, transporte y
 proveedores. La carpeta `server/` aloja Go; la v1 permanece en su
 checkout de referencia y no forma parte de este árbol limpio.
 
-Estructura objetivo; el laboratorio actual implementa sólo cmd/custodia, coverage y lab:
+Estructura objetivo; el laboratorio actual implementa sólo cmd/custodia, coverage, inventory, sync, adapters, gateway y lab:
 
 ```text
 server/
@@ -76,6 +76,28 @@ snapshot sintético en conexiones, corridas y observaciones. Estas últimas
 usan ID interno y restricción única por conexión, colección e ID externo
 opaco. Los equipos apuntan a usuarios de su propia conexión; el correo exacto
 forma candidatos sólo entre las fuentes del par con regla explícita.
+
+La migración aditiva 5 agrega el primer recorrido de sincronización sin
+alterar las migraciones 1–4 ni el snapshot. Una conexión de laboratorio
+declara conector `http-inventory-v1`, URL base, una colección (`users` o
+`devices`), alcance y generación. Las observaciones suman estado
+(`active`/`retired`) y procedencia (`first_run_id`, `last_run_id`, `scope`,
+`generation`, `retired_at`, `retired_by_run_id`); la clave única sigue siendo
+conexión + colección + ID externo. Las corridas tienen estados
+`queued/running/completed/partial/failed`, lease de 15 minutos, idempotencia
+por solicitante y un índice único parcial que impide dos corridas activas por
+conexión. La publicación, la línea base y la auditoría se confirman en una
+sola transacción.
+
+Una corrida completa sólo retira ausencias del mismo alcance y generación que
+la línea base vigente. Una corrida parcial publica las observaciones
+recibidas, pero nunca retira, ni reemplaza la línea base; una fallida no
+publica observaciones ni reemplaza la línea base, aunque registra su estado y
+`sync_complete`. Las revisiones humanas viven en una tabla separada que
+el sync no escribe. El laboratorio ejecuta la extracción en la petición HTTP y
+deja la cola durable; un worker asíncrono, heartbeat en segundo plano, reintentos
+con backoff, etapas por capa y reencola automática siguen pendientes.
+`RequeueExpiredSyncRuns` es explícito y auditado.
 
 Los principales se identifican por emisor/sujeto sintético, con habilitación
 y concesiones de lectura por conexión. Cada consulta une observaciones con

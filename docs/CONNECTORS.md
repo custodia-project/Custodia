@@ -1,12 +1,15 @@
 ---
 estado: vigente
 dueño: Octavio Santacruz
-revisado: 2026-10-22
+revisado: 2026-11-16
 ---
 
 # Conectores: una experiencia común, contratos específicos
 
-**Estado:** contrato propuesto para el producto Go; no es una API disponible.
+**Estado:** contrato de producto. El primer adaptador de laboratorio
+(`http-inventory-v1`) ya está implementado contra un servidor HTTP local
+sintético y probado con SQLite descartable. No hay conector real, probe ni API
+administrativa de conexiones disponible.
 Objetivo: agregar una herramienta sin modificar el núcleo ni obligar al
 operador a conocer sus endpoints. No es posible generalizar los significados
 de todas las APIs con un formulario URL + token.
@@ -99,3 +102,33 @@ Comprobar que no filtra secretos y que una corrida parcial conserva recursos
 anteriores. Un proveedor real necesita además fixtures propios y aceptación
 de lectura en un entorno autorizado. El conector de laboratorio se rotula
 como simulado y no acredita soporte de un fabricante.
+
+## Primer adaptador de laboratorio
+
+`http-inventory-v1` es un contrato interno y sintético, no una emulación de
+Netskope, CyberArk ni otro fabricante. Sólo acepta una URL `http://` con IP
+numérica de loopback, sin usuario, query ni fragmento, y no envía
+credenciales, cookies ni sigue redirects. La conexión declara una colección
+(`users` o `devices`), alcance y generación; la clave persistida es conexión +
+colección + ID externo.
+
+El servidor local responde a
+`GET {base}/v1/collections/{collection}?limit=N&cursor=OPACO` con
+`{"objects":[...],"next_cursor":""}`. Ambos campos son obligatorios:
+`objects` nulo/ausente y `next_cursor` nulo/ausente se rechazan; sólo
+`objects:[]` con `next_cursor:""` explícitos acreditan una colección vacía.
+`next_cursor` vacío acredita el fin de la colección. Los atributos están
+sujetos a allowlist: `users` exige `email` y admite `name`; `devices` exige
+`user_id` y admite `last_signal_at` RFC3339. Se rechazan atributos extra,
+IDs vacíos o fuera de límite, JSON inválido, cursor repetido, página mayor
+que el límite pedido, cuerpo mayor a 1 MiB, content type distinto y códigos
+HTTP distintos de 200. Los errores guardan sólo un código estable y un
+detalle saneado, nunca el cuerpo del proveedor.
+
+Límites por conexión: página 1–500, hasta 1.000 páginas y 100.000 registros.
+Un fallo de transporte o HTTP después de una página produce `partial` con lo
+recibido; un fallo de integridad o un fallo en la primera página no publica
+observaciones. Sólo una corrida `completed` del mismo alcance y generación
+que la línea base puede retirar ausentes. La configuración se realiza en el
+host con `add-http-lab`; las cuentas y secretos reales, la configuración por
+API y el probe de proveedor quedan fuera de este tramo.

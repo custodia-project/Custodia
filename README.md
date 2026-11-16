@@ -168,9 +168,10 @@ from; Custodia is not affiliated with them.
 ## Go backend laboratory
 
 The first self-hosted installation targets single-instance SQLite on local disk.
-The [Go laboratory](server/README.md) implements synthetic people/coverage reads;
-real authentication, connectors and a distributable application remain pending.
-Run `npm run verify:go` for the backend checks.
+The [Go laboratory](server/README.md) implements synthetic people/coverage reads
+and a first bounded read-only HTTP inventory sync against a local synthetic
+source; real authentication, provider connectors and a distributable
+application remain pending. Run `npm run verify:go` for the backend checks.
 
 The explicit `serve` mode now verifies per-request Ozal identity assertions
 and supports host-side bootstrap of the first administrator.

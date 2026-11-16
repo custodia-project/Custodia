@@ -3,11 +3,14 @@
 Primer recorrido sintético de búsqueda, ficha Identity/Netskope y cobertura.
 SQLite local es la autoridad del laboratorio. Usa Go 1.26+ y modernc.org/sqlite
 v1.60.1 (MIT, sin CGO), fijado con sus dependencias en go.mod/go.sum.
-No hay conectores, ingesta ni exportación. El modo serve incorpora identidad
-firmada de Ozal; su integración desplegada sigue pendiente.
+No hay conectores reales, ingesta real de proveedores ni exportación. El modo serve
+incorpora identidad firmada de Ozal; su integración desplegada sigue pendiente.
 Las credenciales siguen siendo sintéticas y locales. La autorización ya se
 resuelve desde principales habilitados y concesiones de lectura por conexión
 en SQLite; una credencial no concede acceso universal a las fuentes.
+El primer adaptador de sincronización de lectura es `http-inventory-v1`, sólo
+para un servidor HTTP sintético en loopback; no acredita soporte de Netskope,
+CyberArk ni otro fabricante.
 
 Desde la raíz:
 
@@ -40,10 +43,11 @@ El harness inyecta la credencial de laboratorio por header; todavía falta
 la aceptación del ingreso contra una instancia real de Ozal.
 
 Rutas auxiliares: preferencias propias GET/PUT en /api/workspaces/preferences,
-con escritura y auditoría transaccional; /api/events y /api/ingestion/schedules
-vacías porque aún no existen eventos de sync ni tareas programadas. Las demás
-rutas responden 404 y las otras escrituras 405. No se fabrican métricas PAM
-para satisfacer consultas de la interfaz. Personas no solicita su dashboard.
+con escritura y auditoría transaccional; /api/events sigue vacía porque el
+feed de actividad no está migrado; las corridas y auditorías de sync se
+consultan en /api/ingestion. Las demás rutas responden 404 y las otras
+escrituras 405. No se fabrican métricas PAM para satisfacer consultas de la
+interfaz. Personas no solicita su dashboard.
 
 Las bases inicializadas con el primer laboratorio requieren ejecutar
 `custodia migrate-lab --dir /ruta/al/laboratorio` antes de servir. La migración
@@ -119,11 +123,75 @@ redondeo de la referencia Python, incluidos los límites de mitad decimal.
 El seed procede del fixture público web/src/demo/model/company.json, con una
 copia embebida comprobada por pruebas. No usa APIs o datos privados.
 
-La próxima entrega debe incorporar sincronización, configuración de fuentes
-y auditoría de inventario, y aceptar la integración desplegada con Ozal. OIDC genérico queda pendiente.
+La sincronización HTTP de laboratorio registra fuentes con límites acotados y
+publica observaciones con procedencia; la aceptación de una instancia real de
+Ozal y recorridos de ingesta en navegador siguen pendientes. OIDC genérico
+queda pendiente.
 La distribución final deberá incluir frontend, instrucciones de configuración,
 versionado y backup/restore consistente de SQLite; no se anuncia todavía una
 versión descargable para producción.
+
+## Sincronización HTTP de laboratorio
+
+El operador del host registra una fuente read-only contra un servidor HTTP
+numérico de loopback, con colección, scope y generación explícitos:
+
+```sh
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection lab-http-a \
+  --url http://127.0.0.1:18080 --collection users --scope scope-a \
+  --grant synthetic-lab
+```
+
+El registro rechaza orígenes que no sean http numérico de loopback,
+colecciones no soportadas (users/devices), scope ausente y conexiones
+duplicadas, y audita configuración y concesiones en la misma transacción.
+Las concesiones distinguen lectura de arranque de corridas (can_run) y sólo
+se otorgan sobre principales habilitados existentes; no hay API administrativa
+pública todavía. Para un lector existente:
+
+```sh
+/tmp/custodia grant-sync-lab --dir /tmp/custodia-lab \
+  --connection lab-http-a --subject reader [--can-run=false]
+```
+
+La lectura se concede siempre; `--can-run=false` deja al lector sin permiso
+para iniciar corridas. Ambas operaciones quedan auditadas en el host y no
+existe todavía una pantalla de administración.
+
+Rutas de /api/ingestion: corridas GET con límite acotado, corrida por ID y sus
+etapas, agendas con último éxito y fallos consecutivos, registros por conexión
+con filtros collection/status, y POST schedules/{id}/runs con cuerpo vacío e
+Idempotency-Key acotada para encolar una corrida (409 si ya hay una running con
+lease vigente; una queued o vencida se retoma, 403 sin can_run, 404 sin revelar
+conexiones ocultas). La corrida se ejecuta en el mismo pedido pero queda
+registrada como durable antes de la primera llamada externa.
+
+La publicación es transaccional y auditada. Una corrida completed con el
+mismo scope y generación que la línea base puede dar de baja ausencias; una
+parcial actualiza observaciones pero nunca retira ni reemplaza la línea base;
+una fallida no publica observaciones ni reemplaza la línea base, aunque
+registra su estado y `sync_complete`. El fencing usa worker, lease y
+`attempt_count`: un intento viejo no puede renovar el lease ni publicar. El
+vencimiento se reencola de forma explícita, acotada a la conexión y auditada
+con el actor que la solicita. Las decisiones humanas viven en una tabla
+separada que la sincronización no escribe, sin endpoint todavía. Antes de
+publicar se revalida la fuente (URL, scope, generación, habilitación) y las
+concesiones del solicitante; un cambio falla sin escribir. No hay conector
+real, credenciales de proveedor ni agenda programada: la frescura se reporta,
+no se infiere. El campo `source_system` se reporta como `netskope` sólo por el
+contrato tipado de la UI; no acredita un conector de ese fabricante.
+
+El servidor local responde
+`GET {base}/v1/collections/{collection}?limit=N&cursor=OPACO` con
+`{"objects":[...],"next_cursor":""}`. Ambos campos son obligatorios; sólo
+`objects:[]` y `next_cursor:""` explícitos acreditan cero observaciones.
+`users` exige `email` y admite `name`; `devices` exige `user_id` y admite
+`last_signal_at` RFC3339. Los atributos fuera de allowlist, el JSON inválido,
+los redirects, las cookies, el content type distinto de JSON, la página mayor
+al límite y el cuerpo mayor a 1 MiB se rechazan. Límites por conexión: página
+1–500, 1.000 páginas y 100.000 registros; un error de transporte después de
+una página deja una corrida parcial, mientras que un error de integridad o de
+la primera página no publica observaciones.
 
 ## Identidad de Ozal y primer administrador
 

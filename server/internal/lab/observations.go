@@ -26,8 +26,9 @@ type Principal struct {
 func (p Principal) Actor() string { return fmt.Sprintf("principal:%d", p.ID) }
 
 type Connection struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Connector string `json:"connector,omitempty"`
 }
 type record struct {
 	Name   string `json:"name,omitempty"`
@@ -76,7 +77,7 @@ func normalize(ctx context.Context, tx *sql.Tx, c Company) error {
 	if _, err := time.Parse(time.RFC3339, c.Company.Captured); err != nil {
 		return fmt.Errorf("invalid lab capture")
 	}
-	for _, connection := range []Connection{{IdentityConnection, "identity"}, {NetskopeConnection, "netskope"}} {
+	for _, connection := range []Connection{{ID: IdentityConnection, Kind: "identity"}, {ID: NetskopeConnection, Kind: "netskope"}} {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO lab_connections VALUES(?,?)", connection.ID, connection.Kind); err != nil {
 			return err
 		}
@@ -207,7 +208,7 @@ func (s *Store) RevokePrincipal(ctx context.Context, subject string) error {
 	return tx.Commit()
 }
 func (s *Store) Connections(ctx context.Context, p Principal) ([]Connection, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.kind FROM lab_connections c JOIN lab_grants g ON g.connection_id=c.id JOIN lab_principals p ON p.id=g.principal_id WHERE p.id=? AND p.enabled=1 ORDER BY c.id`, p.ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.kind,coalesce(s.connector,'') FROM lab_connections c JOIN lab_grants g ON g.connection_id=c.id JOIN lab_principals p ON p.id=g.principal_id LEFT JOIN lab_sync_sources s ON s.connection_id=c.id WHERE p.id=? AND p.enabled=1 ORDER BY c.id`, p.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +216,7 @@ func (s *Store) Connections(ctx context.Context, p Principal) ([]Connection, err
 	result := []Connection{}
 	for rows.Next() {
 		var c Connection
-		if err = rows.Scan(&c.ID, &c.Kind); err != nil {
+		if err = rows.Scan(&c.ID, &c.Kind, &c.Connector); err != nil {
 			return nil, err
 		}
 		result = append(result, c)
@@ -277,7 +278,7 @@ func (s *Store) View(ctx context.Context, p Principal, identity, netskope string
 		}
 		c.runs[key] = run
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT o.row_id,o.connection_id,o.collection,o.external_id,o.document FROM lab_observations o JOIN lab_grants g ON g.connection_id=o.connection_id JOIN lab_principals p ON p.id=g.principal_id WHERE p.id=? AND p.enabled=1 AND o.connection_id IN (?,?) ORDER BY o.row_id`, p.ID, identity, netskope)
+	rows, err = tx.QueryContext(ctx, `SELECT o.row_id,o.connection_id,o.collection,o.external_id,o.document FROM lab_observations o JOIN lab_grants g ON g.connection_id=o.connection_id JOIN lab_principals p ON p.id=g.principal_id WHERE p.id=? AND p.enabled=1 AND o.status='active' AND o.connection_id IN (?,?) ORDER BY o.row_id`, p.ID, identity, netskope)
 	if err != nil {
 		return c, err
 	}

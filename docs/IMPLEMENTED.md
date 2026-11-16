@@ -1,10 +1,95 @@
 ---
 estado: vigente
 dueño: Octavio Santacruz
-revisado: 2026-10-22
+revisado: 2026-11-16
 ---
 
 # Entregas y evidencia
+
+## Sincronización HTTP de laboratorio — 16/11
+
+Primer conector de lectura acotado sobre el laboratorio Go; no cierra
+PROD-CONN-001 ni PROD-INV-001. El contrato normalizado (`internal/inventory`,
+sin SQL ni HTTP) define objetos con ID externo opaco de hasta 512 bytes UTF-8
+sin caracteres de control y atributos con allowlist por colección: users
+requiere email acotado y admite name; devices requiere user_id y admite
+last_signal_at RFC3339. Los valores se recortan y limitan a 1024 bytes UTF-8;
+los atributos no permitidos se rechazan con códigos de error estables.
+`Deduplicate` descarta observaciones idénticas y rechaza las contradictorias
+antes de persistir, como la frontera de normalización Python.
+
+El adaptador `internal/adapters/httpinventory` sólo acepta orígenes http://
+numéricos de loopback, sin redirecciones, cookies, credenciales, query ni
+fragmento; cuerpo acotado a 1 MiB, página acotada al límite pedido, cursor
+opaco de hasta 1024 bytes, decodificación JSON estricta sin contenido final y
+`objects`/`next_cursor` obligatorios: un cuerpo vacío o nulo no acredita cero.
+El runner `internal/sync` acota la corrida (página de hasta 500, máximo de
+páginas y registros): un error de integridad descarta la corrida completa;
+un error de transporte o cancelación después de páginas deja sólo lo
+recolectado como corrida parcial, con avisos max_pages/max_records y sin
+inferir retiros. Un cursor repetido se rechaza.
+
+La migración 5 es aditiva y conserva las anteriores: fuentes sync con
+conector fijo http-inventory-v1, concesiones can_run por principal, corridas
+durables con clave de idempotencia por solicitante y conexión, una sola
+corrida activa por conexión, líneas base por conexión/colección y revisiones
+humanas en tabla separada; lab_observations suma estado y procedencia
+(first/last run, scope, generación, retiro). Cada corrida guarda la URL base
+del enqueue. La publicación es transaccional y auditada en cada transición:
+una corrida completed con igual scope y generación que la línea base puede dar
+de baja ausencias; una parcial actualiza observaciones pero nunca retira ni
+reemplaza la línea base; una fallida no publica observaciones ni reemplaza la
+línea base, aunque registra su estado y `sync_complete`; un conjunto
+contradictorio se publica como fallida conservando la línea base anterior.
+Antes de publicar se revalida que la fuente siga habilitada con la misma URL,
+scope y generación, y que el solicitante conserve lectura y can_run; si no,
+falla con `configuration_changed` o `authorization_revoked` sin escribir.
+El fencing usa worker, lease y `attempt_count`: un intento viejo no puede
+renovar el lease ni publicar después de un requeue o de un nuevo claim. El
+vencimiento se reencola de forma explícita, acotada a la conexión y auditada
+con el actor que la solicita; un fallo de heartbeat terminaliza la corrida si
+el intento aún es dueño, o deja que el intento nuevo la retome si perdió el
+lease. La publicación terminal sobrevive a la cancelación del pedido que
+disparó la corrida.
+
+La API de laboratorio expone lectura de corridas, corrida por ID con etapas,
+agendas con último éxito y fallos consecutivos, registros con estado y
+procedencia, y POST de corrida por conexión con cuerpo vacío, Idempotency-Key
+acotada, 409 si ya hay una corrida running con lease vigente, 403 sin can_run
+y 404 que no revela conexiones ocultas. Una corrida queued o con lease vencido
+se reencola y retoma en ese mismo POST. Las lecturas filtran por concesión en
+la consulta; los registros se leen en una transacción de sólo lectura y las
+corridas ocultas no se distinguen de inexistentes.
+add-http-lab registra la fuente desde el host con validación de loopback,
+colección y scope, concesiones sobre principales habilitados existentes y
+auditoría atómica. Las conexiones HTTP sintéticas no alteran las capacidades
+Identity/Netskope de Personas/cobertura, que ahora excluyen observaciones
+retired. Las revisiones humanas tienen tabla y métodos probados pero todavía
+sin endpoint HTTP.
+
+Verificación: verify:go pasó con vet, race y build, incluyendo los paquetes
+nuevos inventory (contrato y deduplicación), httpinventory y sync (límites,
+parciales, cursores repetidos y errores de integridad), pruebas de store
+(migración aditiva idempotente, configuración rechazada, publicación y
+retiros comparables, parcial sin bajas, fallo atómico, idempotencia por
+conexión, una corrida activa por conexión, fencing por worker/intento tras
+lease vencido, revalidación de fuente y permisos antes de publicar,
+aislamiento de dos conexiones, revisiones que sobreviven al refresco, esquema
+que rechaza versiones futuras) y la API HTTP de sync. npm run verify pasó. El
+gate de navegador no ejercita los recorridos de ingesta y no se repitió la
+suite amplia e2e de web: sus ocho residuales siguen registrados en
+PROD-VERIFY-001 y no se presentan como regresiones nuevas ni como suite verde.
+No hay conector real ni
+proveedor, agenda programada, API administrativa de concesiones ni endpoint
+de revisiones; el source_system reportado no acredita Netskope. No se
+acredita una instancia real de Ozal ni despliegue. Sin commit, push,
+publicación ni servicios modificados.
+
+**Cierre del tramo (16/11):** adaptador HTTP sintético, persistencia,
+publicación, autorización y pruebas de laboratorio cerrados. Fuera de este
+cierre quedan el worker asíncrono y los retries con backoff, la configuración
+administrativa/UI, el adaptador de un proveedor real, la aceptación contra
+Ozal real y el despliegue.
 
 ## Receptor Ozal y administrador inicial — 16/11
 

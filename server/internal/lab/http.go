@@ -45,6 +45,9 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 		s.preferences(w, r, current, principal)
 		return
 	}
+	if s.serveSyncAPI(w, r, current, principal) {
+		return
+	}
 	if r.Method != "GET" {
 		send(405, map[string]string{"detail": "Laboratorio de sólo lectura."})
 		return
@@ -90,6 +93,11 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 		permissions := []string{}
 		identity, netskope := false, false
 		for _, connection := range connections {
+			if connection.Connector != "" {
+				// A synthetic HTTP inventory source is not the provider-specific
+				// read scope used by Personas/cobertura.
+				continue
+			}
 			if connection.Kind == "identity" {
 				identity = true
 			}

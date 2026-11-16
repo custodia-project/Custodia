@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"custodia/server/internal/lab"
 )
 
 func TestExplicitLabInitialization(t *testing.T) {
@@ -69,6 +71,68 @@ func TestScopedCredentialAdministration(t *testing.T) {
 	}
 	if err := command("migrate-lab", "--dir", dir); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLaboratoryHTTPConfigurationIsExplicitAndLoopbackOnly(t *testing.T) {
+	old := os.Args
+	defer func() { os.Args = old }()
+	base := t.TempDir()
+	dir := filepath.Join(base, "lab")
+	command := func(args ...string) error { os.Args = append([]string{"custodia"}, args...); return run() }
+	if err := command("init-lab", "--dir", dir); err != nil {
+		t.Fatal(err)
+	}
+	args := func(url, connection, collection, scope string) []string {
+		return []string{"add-http-lab", "--dir", dir, "--url", url, "--connection", connection, "--collection", collection, "--scope", scope, "--grant", "synthetic-lab"}
+	}
+	if err := command(args("http://192.0.2.1:18080", "lab-http-a", "users", "scope-a")...); err == nil {
+		t.Fatal("non-loopback source accepted")
+	}
+	if err := command(args("https://127.0.0.1:18080", "lab-http-a", "users", "scope-a")...); err == nil {
+		t.Fatal("non-HTTP source accepted")
+	}
+	for _, raw := range []string{"http://user@127.0.0.1:18080", "http://127.0.0.1:18080?x=1", "http://127.0.0.1:99999", "http://127.0.0.1:18080#fragment"} {
+		if err := command(args(raw, "lab-http-a", "users", "scope-a")...); err == nil {
+			t.Fatal("invalid source URL accepted", raw)
+		}
+	}
+	if err := command(args("http://127.0.0.1:18080", "lab-http-a", "secrets", "scope-a")...); err == nil {
+		t.Fatal("unsupported collection accepted")
+	}
+	if err := command(args("http://127.0.0.1:18080", "lab-http-a", "users", "")...); err == nil {
+		t.Fatal("missing scope accepted")
+	}
+	if err := command(args("http://127.0.0.1:18080", "lab-http-a", "users", "scope-a")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "lab-http-a", "users", "scope-a")...); err == nil {
+		t.Fatal("duplicate source accepted")
+	}
+	out := filepath.Join(base, "reader.token")
+	if err := command("issue-lab", "--dir", dir, "--subject", "sync-reader", "--connections", "lab-http-a", "--out", out); err != nil {
+		t.Fatal(err)
+	}
+	if err := command("grant-sync-lab", "--dir", dir, "--connection", "lab-http-a", "--subject", "sync-reader", "--can-run=false"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := lab.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	var canRun int
+	if err = s.DB.QueryRow("SELECT r.can_run FROM lab_sync_grants r JOIN lab_principals p ON p.id=r.principal_id WHERE p.subject='sync-reader'").Scan(&canRun); err != nil || canRun != 0 {
+		t.Fatal("read-only sync grant not stored", err, canRun)
+	}
+	if err := command("grant-sync-lab", "--dir", dir, "--connection", "lab-http-a", "--subject", "sync-reader"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DB.QueryRow("SELECT r.can_run FROM lab_sync_grants r JOIN lab_principals p ON p.id=r.principal_id WHERE p.subject='sync-reader'").Scan(&canRun); err != nil || canRun != 1 {
+		t.Fatal("sync run grant not stored", err, canRun)
+	}
+	if err := command("add-http-lab", "--dir", dir, "--gateway-config", "not-used.json", "--url", "http://127.0.0.1:18080", "--connection", "lab-http-b", "--collection", "users", "--scope", "scope-b"); err == nil {
+		t.Fatal("laboratory source mixed with gateway configuration")
 	}
 }
 

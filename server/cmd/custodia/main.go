@@ -27,7 +27,7 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|serve|init-lab|migrate-lab|issue-lab|revoke-lab|serve-lab --dir PATH")
+		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|serve|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab --dir PATH")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "private Custodia data directory")
@@ -37,6 +37,16 @@ func run() error {
 	connections := f.String("connections", "", "comma-separated allowed connection IDs")
 	output := f.String("out", "", "new private credential file")
 	addr := f.String("listen", "127.0.0.1:8000", "numeric loopback address")
+	connectionID := f.String("connection", "", "laboratory sync connection ID")
+	baseURL := f.String("url", "", "numeric-loopback HTTP inventory base URL")
+	collection := f.String("collection", "", "normalized collection: users or devices")
+	scope := f.String("scope", "", "explicit extraction scope for baseline comparison")
+	generation := f.String("generation", "http-inventory-v1", "data contract generation")
+	pageSize := f.Int("page-size", 100, "bounded page size")
+	maxPages := f.Int("max-pages", 100, "bounded page count")
+	maxRecords := f.Int("max-records", 10000, "bounded record count")
+	grants := f.String("grant", "", "comma-separated laboratory subjects with read/run access")
+	canRun := f.Bool("can-run", true, "grant the explicit sync run capability")
 	if err := f.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -134,6 +144,63 @@ func run() error {
 		success = true
 		fmt.Println("Laboratory credential written to", *output)
 		return nil
+	case "add-http-lab":
+		if _, err := os.Stat(filepath.Join(*dir, "lab.token")); err != nil {
+			return fmt.Errorf("lab directory required")
+		}
+		if *connectionID == "" || *baseURL == "" || *collection == "" || *scope == "" {
+			return fmt.Errorf("--connection, --url, --collection and --scope are required")
+		}
+		path := filepath.Join(*dir, "state.db")
+		if _, err := os.Stat(path); err != nil {
+			return err
+		}
+		s, err := lab.Open(path)
+		if err != nil {
+			return err
+		}
+		defer s.DB.Close()
+		if _, err = s.Load(context.Background()); err != nil {
+			return err
+		}
+		source := lab.SyncSource{
+			ConnectionID: *connectionID, Connector: "http-inventory-v1", BaseURL: *baseURL,
+			Collection: *collection, Scope: *scope, Generation: *generation,
+			PageSize: *pageSize, MaxPages: *maxPages, MaxRecords: *maxRecords,
+		}
+		grantList := []string{}
+		if *grants != "" {
+			grantList = strings.Split(*grants, ",")
+		}
+		if err = s.AddHTTPSource(context.Background(), "host", source, grantList, time.Now()); err != nil {
+			return err
+		}
+		fmt.Println("Laboratory HTTP source added:", *connectionID)
+		return nil
+	case "grant-sync-lab":
+		if _, err := os.Stat(filepath.Join(*dir, "lab.token")); err != nil {
+			return fmt.Errorf("lab directory required")
+		}
+		if *connectionID == "" || *subject == "" {
+			return fmt.Errorf("--connection and --subject are required")
+		}
+		path := filepath.Join(*dir, "state.db")
+		if _, err := os.Stat(path); err != nil {
+			return err
+		}
+		s, err := lab.Open(path)
+		if err != nil {
+			return err
+		}
+		defer s.DB.Close()
+		if _, err = s.Load(context.Background()); err != nil {
+			return err
+		}
+		if err = s.GrantSync(context.Background(), "host", "custodia-lab", *subject, *connectionID, *canRun, time.Now()); err != nil {
+			return err
+		}
+		fmt.Println("Laboratory sync grant written:", *connectionID, *subject)
+		return nil
 	case "migrate", "migrate-lab":
 		if os.Args[1] == "migrate-lab" {
 			if _, err := os.Stat(filepath.Join(*dir, "lab.token")); err != nil {
@@ -226,12 +293,14 @@ func run() error {
 				return err
 			}
 		}
-		srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+		srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		go func() {
 			<-ctx.Done()
-			shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// The laboratory executes a bounded sync inside the request. Give
+			// it enough time to write its terminal audit before closing SQLite.
+			shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Minute+30*time.Second)
 			defer cancel()
 			srv.Shutdown(shutdown)
 		}()
