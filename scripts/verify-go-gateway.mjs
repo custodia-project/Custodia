@@ -5,6 +5,8 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer, request } from 'node:http';
+import { createServer as createSecureServer } from 'node:https';
+import { readFileSync } from 'node:fs';
 import { generateKeyPairSync, createHash, randomUUID, sign } from 'node:crypto';
 import { chromium, expect } from '../web/node_modules/@playwright/test/index.mjs';
 const root=resolve(import.meta.dirname,'..'), temp=await mkdtemp(join(tmpdir(),'custodia-gateway-'));
@@ -12,7 +14,9 @@ const binary=join(temp,'custodia'), data=join(temp,'data'), web=join(temp,'web')
 const issuer='https://login.acme.example', audience='custodia';
 const {publicKey,privateKey}=generateKeyPairSync('ed25519');
 const kid=createHash('sha256').update(Buffer.from(publicKey.export({format:'jwk'}).x,'base64url')).digest('hex').slice(0,32);
-const sessions=new Map(); let backend, browser, proxy, backendPort, lastAssertion;
+const sessions=new Map(); let backend, browser, proxy, tenantFixture, backendPort, lastAssertion;
+const tenantToken='gateway-tenant-token';
+process.env.CUSTODIA_GATEWAY_TENANT_TOKEN=tenantToken;
 function assertion(subject){
  const now=Math.floor(Date.now()/1000);
  const encode=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -62,6 +66,17 @@ try{
   backend=spawn(binary,['serve','--dir',data,'--gateway-config',config,'--web-dir',web,'--listen',`127.0.0.1:${backendPort}`],{stdio:['ignore','pipe','pipe']});
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Backend startup timed out')),10000);backend.stdout.once('data',()=>{clearTimeout(timer);resolve();});backend.once('exit',code=>{clearTimeout(timer);reject(Error(`Backend exited ${code}`));});});
  }
+ // A tenant PAM fixture over TLS: the administrator connects it from the UI
+ // with an env: credential reference and a local CA, then collects it.
+ const tenantKey=join(temp,'tenant.key'),tenantCert=join(temp,'tenant.crt');
+ execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',tenantKey,'-out',tenantCert,'-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1'],{stdio:'pipe'});
+ tenantFixture=createSecureServer({key:readFileSync(tenantKey),cert:readFileSync(tenantCert)},(req,res)=>{
+  if(!req.url?.startsWith('/API/Safes')){res.writeHead(404).end();return;}
+  if(req.headers.authorization!==`Bearer ${tenantToken}`){res.writeHead(401).end();return;}
+  res.writeHead(200,{'Content-Type':'application/json'});
+  res.end(JSON.stringify({value:[{safeNumber:7001,safeName:'Tenant Alpha',safeUrlId:'tenant-alpha'},{safeNumber:7002,safeName:'Tenant Beta',safeUrlId:'tenant-beta'}],count:2,nextLink:''}));
+ });
+ const tenantPort=await listen(tenantFixture), tenantURL=`https://127.0.0.1:${tenantPort}`;
  await start();browser=await chromium.launch();
  const admin=await browser.newContext({locale:'es-AR'}), reader=await browser.newContext({locale:'es-AR'});
  const page=await admin.newPage(), limited=await reader.newPage();
@@ -86,12 +101,43 @@ try{
  if((await fetch(`${direct}/api/auth/status`,{headers:{Authorization:`Bearer ${token}`,'X-Auth-Request-User':'opaque-admin'}})).status!==401)throw Error('Real mode accepted lab/header fallback');
  if(await mutate('DELETE',{subject:'opaque-reader'})!==204)throw Error('Reader revocation failed');
  if((await reader.request.get(`${base}/api/auth/status`)).status()!==403)throw Error('Revoked reader retained access');
+ // Onboarding from an empty catalog: choose tool, tenant URL, credential reference.
+ await page.getByRole('button',{name:'Abrir menú de usuario',exact:true}).click();
+ await page.getByRole('button',{name:'Actividad',exact:true}).click();
+ await page.getByRole('tab',{name:'Conexiones'}).click();
+ await page.getByLabel('Herramienta',{exact:true}).selectOption('cyberark-pam-safes-v1');
+ await page.getByLabel('URL del tenant',{exact:true}).fill(tenantURL);
+ await page.getByLabel('Alcance',{exact:true}).fill('gateway-tenant-safes-v1');
+ await page.getByLabel('Referencia de credencial',{exact:true}).fill('env:CUSTODIA_GATEWAY_TENANT_TOKEN');
+ await page.getByLabel('CA adicional',{exact:true}).fill(tenantCert);
+ await page.getByRole('button',{name:'Conectar tenant'}).click();
+ await expect(page.getByText(/Conexión .* registrada para safes/)).toBeVisible();
+ await page.getByRole('button',{name:'Probar acceso'}).click();
+ await expect(page.getByText('Acceso correcto')).toBeVisible();
+ await expect(page.locator('.connection-probe-table')).toContainText('/API/Safes');
+ const schedules=await (await admin.request.get(`${base}/api/ingestion/schedules`)).json();
+ const tenantRow=schedules.rows.find(row=>String(row.source_file).startsWith('cyberark-pam-safes:'));
+ if(!tenantRow)throw Error('Onboarded connection is missing from the schedule');
+ const queueResponse=await admin.request.post(`${base}/api/ingestion/all/runs?scope=cyberark`,{data:{},headers:{Origin:base}});
+ const queuedText=await queueResponse.text();
+ if(queueResponse.status()!==202)throw Error(`Tenant batch returned ${queueResponse.status()}: ${queuedText}`);
+ const queued=JSON.parse(queuedText);
+ if(!Array.isArray(queued.runs)||queued.runs.length!==1||queued.runs[0].task_key!==tenantRow.task_key)throw Error(`Tenant connection was not queued in isolation: ${queuedText}`);
+ let tenantRun;
+ for(let attempt=0;attempt<100;attempt+=1){
+  tenantRun=await (await admin.request.get(`${base}/api/ingestion/runs/${queued.runs[0].run_id}`)).json();
+  if(!['queued','running'].includes(tenantRun.status))break;
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ if(tenantRun.status!=='completed'||tenantRun.received_object_count!==2)throw Error('Tenant collection did not complete');
+ const tenantRecords=await (await admin.request.get(`${base}/api/ingestion/connections/${tenantRow.task_key}/records`)).json();
+ if(tenantRecords.rows.length!==2||tenantRecords.rows[0].attributes.safe_url_id!=='tenant-alpha')throw Error('Tenant records missing after onboarding');
  // Exercise the frontend logout function, including the browser form submitted to Ozal.
  await page.getByRole('button',{name:'Abrir menú de usuario',exact:true}).click();
  await page.getByRole('button',{name:'Cerrar sesión',exact:true}).click();
  await expect(page).toHaveURL(`${base}/fixture/login`);
  if(sessions.size!==1)throw Error('Gateway logout did not remove administrator session');
- console.log('Ozal-contract gateway + Go + SQLite + real web: signed entry, explicit bootstrap, scoped reader, replay across restart, no fallback, revocation and gateway logout OK.');
+ console.log('Ozal-contract gateway + Go + SQLite + real web: signed entry, explicit bootstrap, scoped reader, replay, tenant onboarding from the UI (tool, TLS tenant, credential reference), probe, collection, no fallback, revocation and gateway logout OK.');
 }finally{
- await browser?.close();await stop();if(proxy)await new Promise(resolve=>proxy.close(resolve));await rm(temp,{recursive:true,force:true});
+ await browser?.close();await stop();if(tenantFixture)await new Promise(resolve=>tenantFixture.close(resolve));if(proxy)await new Promise(resolve=>proxy.close(resolve));await rm(temp,{recursive:true,force:true});
 }

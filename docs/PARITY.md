@@ -73,8 +73,7 @@ Las pruebas incluyen IDs iguales en dos conexiones del mismo proveedor y en
 dos colecciones, fuentes parciales/ausentes, pares sin regla, búsqueda/ficha/
 porcentajes sin filtraciones, revocación inmediata y rollback de concesiones
 o revocación ante una auditoría fallida. Queda por integrar la identidad real,
-la pantalla de alta de conexiones/reglas y las observaciones remotas de
-proveedores. El primer tramo de sincronización de laboratorio se detalla
+la administración de reglas y las observaciones remotas de proveedores. El primer tramo de sincronización de laboratorio se detalla
 abajo; el alta por API existe, pero conectores reales aceptados, backup/restore
 y distribución siguen pendientes en [el tracker](TO_IMPLEMENT.md).
 
@@ -303,8 +302,9 @@ logs operativos ni tabla de etapas; esa telemetría sigue pendiente.
 - La UI de sync ya inicia, consulta y agenda con los contratos anteriores:
   `ingestion:run` se anuncia, `/all/runs` encola, la agenda se edita y las
   etapas por fuente se consultan. `scope=cyberark` aísla las conexiones PAM.
-  La pantalla de alta de conexiones y las revisiones humanas por HTTP siguen
-  sin migrar. La agenda usa timestamps RFC3339 de segundo; el orden de dos
+  La pestaña Conexiones de Actividad ya permite elegir herramienta, registrar
+  el tenant y probar el acceso; las revisiones humanas por HTTP siguen sin
+  migrar. La agenda usa timestamps RFC3339 de segundo; el orden de dos
   corridas del mismo segundo no es significativo.
 - Sin relaciones entre objetos ni grafo CMDB; esta primera entrega sólo
   persiste observaciones de una colección y sus bajas por ausencia. La

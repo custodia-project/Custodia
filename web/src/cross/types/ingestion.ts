@@ -67,3 +67,52 @@ export type SyncStageHistoryRow = {
   item_count: number | null;
   duration_ms: number;
 };
+
+export type ConnectorDescriptor = {
+  id: string;
+  name: string;
+  vendor: string;
+  category: string;
+  status: 'available' | 'laboratory' | 'planned';
+  auth_modes: string[];
+  collections: string[];
+  probe_endpoints: string[];
+  notes: string;
+};
+
+export type TenantConnection = {
+  connection_id: string;
+  connector: string;
+  base_url: string;
+  collection: string;
+  scope: string;
+  generation: string;
+  auth_mode: string;
+  credential_configured: boolean;
+  ca_configured: boolean;
+  mtls_configured: boolean;
+  page_size: number;
+  max_pages: number;
+  max_records: number;
+  interval_minutes: number;
+  enabled: boolean;
+};
+
+export type ConnectionProbeEndpoint = {
+  endpoint: string;
+  status: number;
+  duration_ms: number;
+  objects: number;
+  error?: string;
+};
+
+export type ConnectionProbe = {
+  connection_id: string;
+  failed_endpoints: number;
+  report: {
+    base_url: string;
+    auth_mode: string;
+    credential_ref?: string;
+    endpoints: ConnectionProbeEndpoint[];
+  };
+};

@@ -117,7 +117,10 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 		roles := []string{"reader"}
 		roleNames := []string{"Lector"}
 		if s.IsAdministrator(r.Context(), principal) {
-			permissions = append(permissions, "installation:manage")
+			// The frontend gates the Activity workspace on audit:read (its
+			// manage-gate alternate). The Go administration capability remains
+			// installation:manage; this only exposes the audit surface.
+			permissions = append(permissions, "installation:manage", "audit:read")
 			roles = []string{"admin"}
 			roleNames = []string{"Administrador"}
 		}

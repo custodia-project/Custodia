@@ -1,5 +1,6 @@
 import { api } from './api';
-import type { IngestionRun, SyncStage, SyncStageHistoryRow, SyncTaskSchedule } from '../types/ingestion';
+import type { ConnectorDescriptor, ConnectionProbe, IngestionRun, SyncStage, SyncStageHistoryRow, SyncTaskSchedule, TenantConnection } from '../types/ingestion';
+import type { ConnectionRequest } from './connection-onboarding';
 
 export const INGESTION_RUNS_QUERY_KEY = ['ingestion', 'runs', 50] as const;
 
@@ -35,4 +36,17 @@ export async function updateSyncTaskSchedule(taskKey: string, intervalMinutes: n
 
 export async function runSyncTask(taskKey: string): Promise<{ run_id: string; status: string }> {
   return api(`/ingestion/schedules/${encodeURIComponent(taskKey)}/runs`, { method: 'POST', body: '{}' });
+}
+
+export async function fetchConnectors(signal?: AbortSignal): Promise<ConnectorDescriptor[]> {
+  const data = await api<{ rows: ConnectorDescriptor[] }>('/ingestion/connectors', { signal });
+  return Array.isArray(data?.rows) ? data.rows : [];
+}
+
+export async function createConnection(request: ConnectionRequest): Promise<TenantConnection> {
+  return api<TenantConnection>('/ingestion/connections', { method: 'POST', body: JSON.stringify(request) });
+}
+
+export async function probeConnection(connectionId: string): Promise<ConnectionProbe> {
+  return api<ConnectionProbe>(`/ingestion/connections/${encodeURIComponent(connectionId)}/probe`, { method: 'POST', body: '{}' });
 }

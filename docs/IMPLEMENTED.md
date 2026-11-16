@@ -37,13 +37,23 @@ su ruta sin credenciales. Una conexión registrada se recolecta con el worker
 normal: el probe, la corrida y el adaptador comparten origen, CA, auth y
 límites.
 
+La UI de Actividad suma la pestaña **Conexiones**: elige herramienta, valida en
+el navegador las mismas reglas del backend (HTTPS, referencias, colección,
+intervalo), registra el tenant, prueba el acceso y muestra el resultado por
+endpoint. Sólo se ofrece a `installation:manage`. El backend ahora anuncia
+`audit:read` al administrador para que la pantalla de Actividad sea alcanzable
+con la identidad real, no sólo en el laboratorio.
+
 Verificación: `TestRegistrySeparatesImplementedFromPlanned`,
 `TestTenantOnboardingProbeAndCollection` (alta → probe → corrida → registros
 sobre TLS), `TestTenantOnboardingRejectsUnsafeConfiguration`,
 `TestTenantProbeFailsWhenCredentialSourceIsAbsent`,
 `TestRemoteTenantHTTPSWithPathPrefix` y
-`TestRemoteTenantRejectsUnsafeBase`, entre otras. Límites: no se contactó un
-tenant real; Netskope y las demás herramientas siguen sin contrato Go.
+`TestRemoteTenantRejectsUnsafeBase`, entre otras. `verify:go:gateway` recorre
+el alta completa desde la UI contra un tenant TLS: elegir CyberArk, pegar la
+URL, referencia `env:`, CA local, conectar, probar y recolectar dos Safes.
+Límites: no se contactó un tenant real; Netskope y las demás herramientas
+siguen sin contrato Go.
 
 ## Backup/restore SQLite y paquete autohospedado — 16/11
 
