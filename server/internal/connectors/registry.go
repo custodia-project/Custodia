@@ -16,11 +16,20 @@ type Descriptor struct {
 	Vendor         string   `json:"vendor"`
 	Category       string   `json:"category"`
 	Status         string   `json:"status"`
+	Distribution   string   `json:"distribution,omitempty"`
 	AuthModes      []string `json:"auth_modes"`
 	Collections    []string `json:"collections"`
 	ProbeEndpoints []string `json:"probe_endpoints"`
 	Notes          string   `json:"notes"`
 }
+
+// Distribution says whether the source tool itself is open source (its API
+// can be exercised against a self-hosted instance) or commercial (it needs a
+// customer tenant). It is a catalog label, not a support claim.
+const (
+	DistributionOpenSource = "open-source"
+	DistributionCommercial = "commercial"
+)
 
 const (
 	StatusAvailable  = "available"
@@ -46,11 +55,12 @@ var cyberArkEndpoints = []string{
 
 var registry = []Descriptor{
 	{
-		ID:       CyberArkPAM,
-		Name:     "CyberArk PAM",
-		Vendor:   "CyberArk",
-		Category: "PAM",
-		Status:   StatusAvailable,
+		ID:           CyberArkPAM,
+		Distribution: DistributionCommercial,
+		Name:         "CyberArk PAM",
+		Vendor:       "CyberArk",
+		Category:     "PAM",
+		Status:       StatusAvailable,
 		AuthModes: []string{
 			"bearer", "oauth-client-credentials", "mtls",
 		},
@@ -72,52 +82,139 @@ var registry = []Descriptor{
 		Notes:          "Synthetic loopback contract for tests and the local browser gate. Not a vendor connector and not for tenant onboarding.",
 	},
 	{
-		ID:       "netskope",
-		Name:     "Netskope",
-		Vendor:   "Netskope",
-		Category: "SSE",
-		Status:   StatusPlanned,
-		Notes:    "The DS Hub contract exists, but no Go adapter is implemented or accepted. Planned status does not authorize endpoints or credentials.",
+		ID:           "netskope",
+		Distribution: DistributionCommercial,
+		Name:         "Netskope",
+		Vendor:       "Netskope",
+		Category:     "SSE",
+		Status:       StatusPlanned,
+		Notes:        "The DS Hub contract exists, but no Go adapter is implemented or accepted. Planned status does not authorize endpoints or credentials.",
 	},
 	{
-		ID:       "qradar",
-		Name:     "IBM QRadar",
-		Vendor:   "IBM",
-		Category: "SIEM",
-		Status:   StatusPlanned,
-		Notes:    "No Custodia contract. Endpoints, auth and collections must be approved before a connection can be created.",
+		ID:           "qradar",
+		Distribution: DistributionCommercial,
+		Name:         "IBM QRadar",
+		Vendor:       "IBM",
+		Category:     "SIEM",
+		Status:       StatusPlanned,
+		Notes:        "No Custodia contract. Endpoints, auth and collections must be approved before a connection can be created.",
 	},
 	{
-		ID:       "paloalto",
-		Name:     "Palo Alto Networks",
-		Vendor:   "Palo Alto Networks",
-		Category: "Network security",
-		Status:   StatusPlanned,
-		Notes:    "No Custodia contract. Firewall or Panorama scope must be decided per tenant before implementation.",
+		ID:           "paloalto",
+		Distribution: DistributionCommercial,
+		Name:         "Palo Alto Networks",
+		Vendor:       "Palo Alto Networks",
+		Category:     "Network security",
+		Status:       StatusPlanned,
+		Notes:        "No Custodia contract. Firewall or Panorama scope must be decided per tenant before implementation.",
 	},
 	{
-		ID:       "fortigate",
-		Name:     "FortiGate",
-		Vendor:   "Fortinet",
-		Category: "Network security",
-		Status:   StatusPlanned,
-		Notes:    "No Custodia contract. FortiGate and FortiManager expose different APIs and neither is approved yet.",
+		ID:           "fortigate",
+		Distribution: DistributionCommercial,
+		Name:         "FortiGate",
+		Vendor:       "Fortinet",
+		Category:     "Network security",
+		Status:       StatusPlanned,
+		Notes:        "No Custodia contract. FortiGate and FortiManager expose different APIs and neither is approved yet.",
 	},
 	{
-		ID:       "crowdstrike",
-		Name:     "CrowdStrike Falcon",
-		Vendor:   "CrowdStrike",
-		Category: "EDR",
-		Status:   StatusPlanned,
-		Notes:    "No Custodia contract in this backend. Planned status carries no endpoint or scope claim.",
+		ID:           "crowdstrike",
+		Distribution: DistributionCommercial,
+		Name:         "CrowdStrike Falcon",
+		Vendor:       "CrowdStrike",
+		Category:     "EDR",
+		Status:       StatusPlanned,
+		Notes:        "No Custodia contract in this backend. Planned status carries no endpoint or scope claim.",
 	},
 	{
-		ID:       "tenable",
-		Name:     "Tenable",
-		Vendor:   "Tenable",
-		Category: "Vulnerability management",
-		Status:   StatusPlanned,
-		Notes:    "No Custodia contract. Asset and vulnerability scopes must be approved before onboarding.",
+		ID:           "tenable",
+		Distribution: DistributionCommercial,
+		Name:         "Tenable",
+		Vendor:       "Tenable",
+		Category:     "Vulnerability management",
+		Status:       StatusPlanned,
+		Notes:        "No Custodia contract. Asset and vulnerability scopes must be approved before onboarding.",
+	},
+	{
+		ID:           "fortimail",
+		Name:         "FortiMail",
+		Vendor:       "Fortinet",
+		Category:     "Email security",
+		Status:       StatusPlanned,
+		Distribution: DistributionCommercial,
+		Notes:        "No Custodia contract. Requires a customer appliance or tenant to validate its REST API before implementation.",
+	},
+	{
+		ID:           "wazuh",
+		Name:         "Wazuh",
+		Vendor:       "Wazuh",
+		Category:     "SIEM/XDR",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source priority candidate. Server REST API to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "fleet-osquery",
+		Name:         "Fleet (osquery)",
+		Vendor:       "Fleet",
+		Category:     "Endpoint inventory",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source priority candidate. REST API to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "defectdojo",
+		Name:         "DefectDojo",
+		Vendor:       "OWASP",
+		Category:     "Vulnerability management",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source priority candidate. REST API v2 to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "crowdsec",
+		Name:         "CrowdSec",
+		Vendor:       "CrowdSec",
+		Category:     "Intrusion prevention",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source candidate. Local API to be verified against a self-hosted instance; the hosted console is out of scope.",
+	},
+	{
+		ID:           "opnsense",
+		Name:         "OPNsense",
+		Vendor:       "Deciso",
+		Category:     "Network security",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source candidate. REST API to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "keycloak",
+		Name:         "Keycloak",
+		Vendor:       "Keycloak",
+		Category:     "IAM",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source candidate. Admin REST API to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "misp",
+		Name:         "MISP",
+		Vendor:       "MISP Project",
+		Category:     "Threat intelligence",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source candidate. REST API to be verified against a self-hosted instance before a contract is approved.",
+	},
+	{
+		ID:           "openbao",
+		Name:         "OpenBao",
+		Vendor:       "OpenBao",
+		Category:     "Secrets management",
+		Status:       StatusPlanned,
+		Distribution: DistributionOpenSource,
+		Notes:        "Open-source candidate. Metadata-only scope (mounts, auth methods, policies); secret values are never read.",
 	},
 }
 

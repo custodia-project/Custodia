@@ -74,6 +74,7 @@ export type ConnectorDescriptor = {
   vendor: string;
   category: string;
   status: 'available' | 'laboratory' | 'planned';
+  distribution?: 'open-source' | 'commercial';
   auth_modes: string[];
   collections: string[];
   probe_endpoints: string[];

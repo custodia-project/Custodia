@@ -118,6 +118,49 @@ grupo es la unidad que ve el operador; la separación interna evita mezclar
 retiros de una colección con los de otra.
 
 
+## Catálogo y prioridad (decisión del dueño, 16/11)
+
+El catálogo lista todas las herramientas pedidas, pero el trabajo se
+concentra en las **de código abierto con API documentada**: se pueden
+instalar en un laboratorio propio y aceptar contra una instancia real, sin
+esperar a que una empresa abra su tenant. Las comerciales quedan listadas
+como `planned` hasta que un cliente dé acceso autorizado a su API.
+
+Cada descriptor lleva `distribution` (`open-source` o `commercial`). Es una
+etiqueta de catálogo; no acredita soporte ni contrato.
+
+| Herramienta | Categoría | Distribución | Estado | Cómo se valida |
+|---|---|---|---|---|
+| CyberArk PAM | PAM | Comercial | Implementado contra fixture | Tenant autorizado de un cliente. |
+| Netskope | SSE | Comercial | Planificado | Tenant de un cliente. |
+| IBM QRadar | SIEM | Comercial | Planificado | Instancia de un cliente. |
+| CrowdStrike Falcon | EDR | Comercial | Planificado | Tenant de un cliente. |
+| FortiMail | Email security | Comercial | Planificado | Appliance o tenant de un cliente. |
+| FortiGate | Network security | Comercial | Planificado | Appliance de un cliente. |
+| Palo Alto Networks | Network security | Comercial | Planificado | Firewall/Panorama de un cliente. |
+| Tenable | Vulnerability management | Comercial | Planificado | Tenant de un cliente. |
+| Wazuh | SIEM/XDR | Código abierto | Candidato prioritario | Instancia propia. |
+| Fleet (osquery) | Endpoint inventory | Código abierto | Candidato prioritario | Instancia propia. |
+| DefectDojo | Vulnerability management | Código abierto | Candidato prioritario | Instancia propia. |
+| CrowdSec | Intrusion prevention | Código abierto | Candidato | API local de una instancia propia. |
+| OPNsense | Network security | Código abierto | Candidato | Instancia propia. |
+| Keycloak | IAM | Código abierto | Candidato | Instancia propia. |
+| MISP | Threat intelligence | Código abierto | Candidato | Instancia propia. |
+| OpenBao | Secrets management | Código abierto | Candidato | Instancia propia; sólo metadatos, nunca valores. |
+
+Las licencias, endpoints y modos de autenticación de los candidatos se
+verifican contra la documentación oficial y una instancia propia antes de
+aprobar su contrato; esta tabla no los fija. Llamar a la API de una
+herramienta no incorpora su código: no copiar código ni fixtures de sus
+repositorios sin revisar la licencia. La instancia de laboratorio se usa con
+datos sintéticos.
+
+Pasos para pasar un candidato a implementado: contrato (endpoints,
+allowlist, paginación, autenticación de lectura), fixture sintético, adaptador
+con el contrato de aceptación común, métricas declaradas y aceptación contra
+la instancia propia. Un conector por vez; no abrir varios a medias.
+
+
 ## Estados y reconciliación
 
 Estados por colección: sin configurar, pendiente, ejecutando, completa,

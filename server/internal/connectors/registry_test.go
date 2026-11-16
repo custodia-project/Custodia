@@ -7,7 +7,10 @@ func TestRegistrySeparatesImplementedFromPlanned(t *testing.T) {
 	if !found || cyberArk.Status != StatusAvailable || len(cyberArk.Collections) == 0 || len(cyberArk.AuthModes) == 0 {
 		t.Fatal(cyberArk, found)
 	}
-	for _, id := range []string{"netskope", "qradar", "paloalto", "fortigate"} {
+	for _, id := range []string{
+		"netskope", "qradar", "paloalto", "fortigate", "fortimail", "crowdstrike", "tenable",
+		"wazuh", "fleet-osquery", "defectdojo", "crowdsec", "opnsense", "keycloak", "misp", "openbao",
+	} {
 		descriptor, found := Get(id)
 		if !found || descriptor.Status != StatusPlanned {
 			t.Fatal(id, descriptor, found)
@@ -19,6 +22,16 @@ func TestRegistrySeparatesImplementedFromPlanned(t *testing.T) {
 		}
 		if Connectable(descriptor) {
 			t.Fatal("planned connector is connectable", id)
+		}
+	}
+	// Every vendor tool says whether it is open source or commercial; only the
+	// synthetic laboratory contract carries no distribution label.
+	for _, descriptor := range List() {
+		if descriptor.Status == StatusLaboratory {
+			continue
+		}
+		if descriptor.Distribution != DistributionOpenSource && descriptor.Distribution != DistributionCommercial {
+			t.Fatal("vendor connector without distribution label", descriptor.ID)
 		}
 	}
 	if Connectable(Descriptor{Status: StatusLaboratory}) != true {
