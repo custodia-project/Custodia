@@ -5,7 +5,7 @@
 *.key
 *.pem
 .secrets/
-
+presentation/
 # Local build and development output
 node_modules/
 dist/
@@ -16,7 +16,7 @@ test-results/
 artifacts/
 *.log
 .DS_Store
-
+.commandcode/
 # Copia local del DSHub original (datos del empleador): nunca subir
 DSHub-feat-netskope-dev/
 *.zip
