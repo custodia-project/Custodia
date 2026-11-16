@@ -84,7 +84,7 @@ func TestLaboratoryHTTPConfigurationIsExplicitAndLoopbackOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := func(url, connection, collection, scope string) []string {
-		return []string{"add-http-lab", "--dir", dir, "--url", url, "--connection", connection, "--collection", collection, "--scope", scope, "--grant", "synthetic-lab"}
+		return []string{"add-http-lab", "--dir", dir, "--url", url, "--connection", connection, "--collection", collection, "--scope", scope, "--interval-minutes", "5", "--grant", "synthetic-lab"}
 	}
 	if err := command(args("http://192.0.2.1:18080", "lab-http-a", "users", "scope-a")...); err == nil {
 		t.Fatal("non-loopback source accepted")
@@ -121,6 +121,10 @@ func TestLaboratoryHTTPConfigurationIsExplicitAndLoopbackOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.DB.Close()
+	var interval int
+	if err = s.DB.QueryRow("SELECT interval_minutes FROM lab_sync_sources WHERE connection_id='lab-http-a'").Scan(&interval); err != nil || interval != 5 {
+		t.Fatal("sync interval not stored", err, interval)
+	}
 	var canRun int
 	if err = s.DB.QueryRow("SELECT r.can_run FROM lab_sync_grants r JOIN lab_principals p ON p.id=r.principal_id WHERE p.subject='sync-reader'").Scan(&canRun); err != nil || canRun != 0 {
 		t.Fatal("read-only sync grant not stored", err, canRun)
@@ -133,6 +137,98 @@ func TestLaboratoryHTTPConfigurationIsExplicitAndLoopbackOnly(t *testing.T) {
 	}
 	if err := command("add-http-lab", "--dir", dir, "--gateway-config", "not-used.json", "--url", "http://127.0.0.1:18080", "--connection", "lab-http-b", "--collection", "users", "--scope", "scope-b"); err == nil {
 		t.Fatal("laboratory source mixed with gateway configuration")
+	}
+}
+
+func TestLaboratoryCyberArkPAMConnectorIsExplicit(t *testing.T) {
+	old := os.Args
+	defer func() { os.Args = old }()
+	dir := filepath.Join(t.TempDir(), "lab")
+	command := func(args ...string) error { os.Args = append([]string{"custodia"}, args...); return run() }
+	if err := command("init-lab", "--dir", dir); err != nil {
+		t.Fatal(err)
+	}
+	args := func(url, connection, connector, collection string) []string {
+		return []string{"add-http-lab", "--dir", dir, "--url", url, "--connection", connection,
+			"--connector", connector, "--collection", collection, "--scope", "synthetic-safes-v1", "--grant", "synthetic-lab"}
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-safes", "cyberark-pam-safes-v1", "safes")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-members", "cyberark-pam-safes-v1", "safe_members")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-accounts", "cyberark-pam-safes-v1", "accounts")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-platforms", "cyberark-pam-safes-v1", "platforms")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-psm-servers", "cyberark-pam-safes-v1", "psm_servers")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-psm-connectors", "cyberark-pam-safes-v1", "psm_connectors")...); err != nil {
+		t.Fatal(err)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-psm-links", "cyberark-pam-safes-v1", "platform_psm_links")...); err != nil {
+		t.Fatal(err)
+	}
+	s, err := lab.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	var connector, collection, generation string
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-safes'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "safes" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-members'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "safe_members" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-accounts'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "accounts" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-platforms'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "platforms" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-psm-servers'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "psm_servers" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-psm-connectors'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "psm_connectors" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err = s.DB.QueryRow("SELECT connector,collection,generation FROM lab_sync_sources WHERE connection_id='pam-psm-links'").Scan(&connector, &collection, &generation); err != nil {
+		t.Fatal(err)
+	}
+	if connector != "cyberark-pam-safes-v1" || collection != "platform_psm_links" || generation != "cyberark-pam-safes-v1" {
+		t.Fatal(connector, collection, generation)
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-users", "cyberark-pam-safes-v1", "users")...); err == nil {
+		t.Fatal("PAM connector accepted an unrelated collection")
+	}
+	if err := command(args("http://127.0.0.1:18080", "http-safes", "http-inventory-v1", "safes")...); err == nil {
+		t.Fatal("synthetic HTTP connector accepted Safes")
+	}
+	if err := command(args("http://127.0.0.1:18080", "pam-unknown", "unknown-connector", "safes")...); err == nil {
+		t.Fatal("unknown connector accepted")
 	}
 }
 

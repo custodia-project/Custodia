@@ -78,12 +78,19 @@ opaco. Los equipos apuntan a usuarios de su propia conexión; el correo exacto
 forma candidatos sólo entre las fuentes del par con regla explícita.
 
 La migración aditiva 5 agrega el primer recorrido de sincronización sin
-alterar las migraciones 1–4 ni el snapshot. Una conexión de laboratorio
-declara conector `http-inventory-v1`, URL base, una colección (`users` o
-`devices`), alcance y generación. Las observaciones suman estado
-(`active`/`retired`) y procedencia (`first_run_id`, `last_run_id`, `scope`,
-`generation`, `retired_at`, `retired_by_run_id`); la clave única sigue siendo
-conexión + colección + ID externo. Las corridas tienen estados
+alterar las migraciones 1–4 ni el snapshot. Una conexión declara un conector
+registrado, URL base, una colección, alcance y generación. El conector
+`http-inventory-v1` lee `users`/`devices` de un fixture normalizado;
+`cyberark-pam-safes-v1` lee las colecciones `safes`, `safe_members`,
+`accounts`, `platforms`, `psm_servers`, `psm_connectors` y
+`platform_psm_links` con los contratos `/API/Safes`,
+`/API/Safes/{safeName}/Members`, `/API/Accounts`, `/API/Platforms`,
+`/API/PSM/Servers` y `/API/PSM/Connectors` de CyberArk contra un fixture
+loopback. El cruce plataforma↔PSM se publica como observación explicable, no
+como una tabla de relaciones inventada. Las observaciones suman
+estado (`active`/`retired`) y procedencia (`first_run_id`, `last_run_id`,
+`scope`, `generation`, `retired_at`, `retired_by_run_id`); la clave única sigue
+siendo conexión + colección + ID externo. Las corridas tienen estados
 `queued/running/completed/partial/failed`, lease de 15 minutos, idempotencia
 por solicitante y un índice único parcial que impide dos corridas activas por
 conexión. La publicación, la línea base y la auditoría se confirman en una
@@ -94,10 +101,14 @@ la línea base vigente. Una corrida parcial publica las observaciones
 recibidas, pero nunca retira, ni reemplaza la línea base; una fallida no
 publica observaciones ni reemplaza la línea base, aunque registra su estado y
 `sync_complete`. Las revisiones humanas viven en una tabla separada que
-el sync no escribe. El laboratorio ejecuta la extracción en la petición HTTP y
-deja la cola durable; un worker asíncrono, heartbeat en segundo plano, reintentos
-con backoff, etapas por capa y reencola automática siguen pendientes.
-`RequeueExpiredSyncRuns` es explícito y auditado.
+el sync no escribe. La migración aditiva 6 agrega `interval_minutes` por conexión. `serve` y
+`serve-lab` inician un worker que reclama una corrida `queued`, renueva
+heartbeat y lease cada 30 s, reencola vencidas y ejecuta de a una extracción.
+Un scheduler por intervalo encola cuando no hay corrida activa; un fallo se
+reintenta en el siguiente intervalo. La API sólo encola y la UI consulta el
+estado. Quedan pendientes un pool de workers, backoff/prioridad por fuente,
+etapas por capa en SQLite y la recuperación automática de un proceso caído
+fuera del lease.
 
 Los principales se identifican por emisor/sujeto sintético, con habilitación
 y concesiones de lectura por conexión. Cada consulta une observaciones con

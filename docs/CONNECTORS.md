@@ -6,10 +6,12 @@ revisado: 2026-11-16
 
 # Conectores: una experiencia común, contratos específicos
 
-**Estado:** contrato de producto. El primer adaptador de laboratorio
-(`http-inventory-v1`) ya está implementado contra un servidor HTTP local
-sintético y probado con SQLite descartable. No hay conector real, probe ni API
-administrativa de conexiones disponible.
+**Estado:** contrato de producto. Dos adaptadores implementados y probados
+contra servidores HTTP locales sintéticos: el contrato normalizado
+`http-inventory-v1` y el contrato CyberArk PAM `cyberark-pam-safes-v1`
+(colecciones `safes`, `safe_members`, `accounts`, `platforms`, `psm_servers`,
+`psm_connectors` y `platform_psm_links`). No hay credenciales, TLS, probe ni
+API administrativa de conexiones; ningún adaptador acredita un tenant real.
 Objetivo: agregar una herramienta sin modificar el núcleo ni obligar al
 operador a conocer sus endpoints. No es posible generalizar los significados
 de todas las APIs con un formulario URL + token.
@@ -130,5 +132,140 @@ Un fallo de transporte o HTTP después de una página produce `partial` con lo
 recibido; un fallo de integridad o un fallo en la primera página no publica
 observaciones. Sólo una corrida `completed` del mismo alcance y generación
 que la línea base puede retirar ausentes. La configuración se realiza en el
-host con `add-http-lab`; las cuentas y secretos reales, la configuración por
-API y el probe de proveedor quedan fuera de este tramo.
+host con `add-http-lab`; el intervalo `0` deshabilita la agenda y un valor de
+5–525600 minutos la habilita. `serve`/`serve-lab` inician un worker que ejecuta
+la cola con heartbeat/lease; la API sólo encola y la UI consulta. Las cuentas
+y secretos reales, la configuración por API y el probe de proveedor quedan
+fuera de este tramo.
+
+## Segundo adaptador: CyberArk PAM Safes (fixture)
+
+`cyberark-pam-safes-v1` implementa la forma documentada de
+`GET /API/Safes?limit=N`: `{"value":[...],"count":N,"nextLink":...}`. El
+`nextLink` debe pertenecer al mismo origen y a `/API/Safes`; no se siguen
+redirecciones, URLs externas, fragmentos ni credenciales embebidas. `count` es
+el total esperado y el runner rechaza una colección incompleta o un total que
+cambie entre páginas. La allowlist de metadatos es:
+
+```text
+safeNumber (ID externo), safeName, safeUrlId, location, creatorName,
+olacEnabled, numberOfVersionsRetention, numberOfDaysRetention,
+autoPurgeEnabled, creationTime, lastModificationTime, description,
+managingCPM, isExpiredMember
+```
+
+Los epochs se normalizan a RFC3339; los campos fuera de la allowlist se
+descartan. Se excluyen cuentas, secretos, tickets, sesiones y el payload
+completo. La primera página 401/403 falla sin publicar; un error de una página
+posterior deja `partial` con lo leído y nunca retira Safes.
+
+El mismo conector puede configurarse como una segunda conexión con la
+colección `safe_members`. El adaptador enumera primero `/API/Safes` completo y
+luego pagina `GET /API/Safes/{safeName}/Members?limit=N` para cada Safe. El cursor de la
+colección es opaco y combina el índice de Safe con el `nextLink` del proveedor;
+un cursor que cambie de Safe u origen se rechaza. La allowlist de miembro es
+`safeNumber`, `safeName` (padre), `memberId`, `memberName`, `memberType`,
+`membershipExpirationDate`, `isExpiredMembershipEnable`, `isPredefinedUser`,
+`isReadOnly` y `permissions`. El ID externo es `safeNumber:memberId`; los
+permisos se guardan como objeto JSON acotado. La enumeración de Safes está
+acotada a 100 páginas y 10.000 Safes; se rechazan duplicados. Se valida el
+total de miembros por Safe y el total agregado: una lista corta o un total
+cambiante falla sin publicar. Un Safe sin miembros sólo acredita cero con
+`value:[]` y `count:0` explícitos.
+
+La colección `accounts` lee `/API/Accounts?limit=N` y resuelve el Safe padre
+por nombre contra la misma enumeración acotada. La allowlist es `id` (o
+`accountId`/`account_id`), `name`/`accountName`/`userName` como nombre de
+cuenta, `userName`, `address`, `safeName`, `platformId`, `accountType`,
+`category` y el subconjunto `secretManagement` con
+`automaticManagementEnabled`, `status` normalizado (`success`, `failure`,
+`in_process`) y `lastModifiedTime` convertido a RFC3339. El ID externo es
+`safeNumber:accountId`. Se excluyen contraseñas, `platformAccountProperties`,
+`manualManagementReason`, `lastModifiedBy`, `secretType` y el payload. Una
+cuenta sin Safe visible o sin ID se omite y la corrida termina `partial` con
+aviso `skipped_accounts`: publica lo leído pero no retira cuentas ni reemplaza
+la línea base, igual que la supresión de reconciliación de DS Hub.
+
+La colección `platforms` lee `/API/Platforms`, que el contrato verificado
+devuelve `{Platforms:[...], Total:N}` en una sola respuesta. El adaptador
+valida `Total` contra la lista y luego sirve páginas locales acotadas con un
+cursor propio; no inventa parámetros de paginación del proveedor. La allowlist
+es `general.id` (ID externo), `general.name` (o el ID como fallback),
+`general.active`, `general.platformBaseID`, `general.platformType`,
+`general.systemType` y `sessionManagement.PSMServerID`. Se excluyen
+`properties`, políticas, reglas de contraseña y el payload. El detalle
+`/API/Platforms/{id}` y `Details.AllowedSafes` quedan fuera de este tramo.
+`psm_server_id` es una referencia textual; el cruce explicable se publica en
+la colección `platform_psm_links`, no se infiere al leer.
+
+Las colecciones `psm_servers` y `psm_connectors` implementan los catálogos
+verificados `GET /API/PSM/Servers?limit=1000` y
+`GET /API/PSM/Connectors?limit=1000`, con respuestas
+`{PSMServers:[...], Total:N}` y `{PSMConnectors:[...], Total:N}`. El adaptador
+valida `Total` y sirve páginas locales acotadas. La allowlist de servidor es
+`ID` (ID externo), `Name` (fallback al ID) y `Address`; la de conector es
+`ID` (ID externo) y `DisplayName` (fallback al ID). Se excluyen propiedades,
+tipos técnicos no allowlisted, capacidad, salud y el payload.
+
+`platform_psm_links` cruza en una corrida la referencia
+`sessionManagement.PSMServerID` de cada plataforma contra `psm_servers`:
+
+- `exact`: la referencia coincide literalmente con un ID del catálogo.
+- `casefold`: hay un único ID distinto que coincide ignorando mayúsculas.
+- `ambiguous`: hay dos o más IDs distintos que sólo difieren en mayúsculas; se
+  publica la fila con `resolution=ambiguous` y sin objetivo elegido.
+- `missing`: no hay candidato; se publica la referencia cruda con
+  `resolution=missing`.
+
+El ID externo es `platformID:referencePSMID`; la allowlist es `platform_id`,
+`platform_name`, `reference_psm_id`, `psm_server_id`, `psm_server_name` y
+`resolution`. Una fila `ambiguous` no es una arista: deja evidencia de por qué
+no se eligió un PSM. Una `missing` conserva el ID crudo y no inventa un
+servidor del catálogo. Sólo una corrida completa retira vínculos cuyas
+referencias desaparecieron; parcial y fallida no retiran. El cruce no usa
+nombres de plataforma, prefijos ni similitud.
+
+Los miembros, las cuentas, las plataformas y los catálogos PSM son
+colecciones separadas, no relaciones inventadas entre sí, con roles o con
+PSM. La cadena `users → roles → safes → platforms → psm` completa, el detalle
+de plataforma y el probe/TLS siguen en tramos posteriores.
+
+Configuración de un fixture local:
+
+```sh
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-safes \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection safes --scope synthetic-safes-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-members \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection safe_members --scope synthetic-members-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-accounts \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection accounts --scope synthetic-accounts-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-platforms \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection platforms --scope synthetic-platforms-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-servers \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection psm_servers --scope synthetic-psm-servers-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-connectors \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection psm_connectors --scope synthetic-psm-connectors-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-links \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection platform_psm_links --scope synthetic-psm-links-v1 \
+  --generation cyberark-pam-safes-v1 --page-size 2 --grant synthetic-lab
+```
+
+Este tramo no usa TLS ni credenciales de CyberArk y no debe apuntarse a un
+tenant real. El probe TLS de lectura está probado contra fixtures locales y
+cableado al comando `probe-pam` con bearer, OAuth client-credentials, mTLS y
+referencias `env:`/`file:`/`secret:`. La validación del contrato real,
+autorización de tenant y aceptación en un entorno autorizado siguen pendientes
+de `PROD-REAL-001`. El contrato está en [PROBE.md](PROBE.md).

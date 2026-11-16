@@ -169,13 +169,17 @@ lee; Custodia no está afiliado a ellos.
 La primera instalación autohospedada usará SQLite en disco local para evitar
 un servicio de base de datos separado. Ya existe un [laboratorio Go](server/README.md)
 de Personas/cobertura con datos sintéticos, inicialización explícita y API de
-lectura, más un primer adaptador de sincronización HTTP de lectura contra un
-servidor local sintético. No es todavía una instalación empresarial ni
-sustituye la demo pública.
+lectura, más adaptadores de sincronización HTTP de lectura para inventario
+normalizado, Safes PAM, miembros de Safe, cuentas no secretas, plataformas,
+catálogos PSM y cruce plataforma↔PSM contra fixtures locales, con worker y
+agenda por conexión. No es todavía una instalación empresarial ni sustituye
+la demo pública.
 
 ```bash
 npm run verify:go
 npm run verify:go:web  # interfaz real → API Go → SQLite temporal
+npm run verify:go:ops  # backup con servicio activo, restore y paquete
+npm run package:go     # binario + web + manifiesto, sin publicar
 ```
 
 El modo `serve` incorpora un receptor de identidad firmada de Ozal y el alta

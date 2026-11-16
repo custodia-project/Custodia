@@ -6,7 +6,10 @@ import (
 	"crypto/rand"
 	"custodia/server/internal/gateway"
 	"custodia/server/internal/lab"
+	"custodia/server/internal/probe"
+	"custodia/server/internal/sqlitebackup"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -19,15 +22,54 @@ import (
 	"time"
 )
 
+type exitCodeError struct {
+	code int
+	err  error
+}
+
+func (e *exitCodeError) Error() string { return e.err.Error() }
+func (e *exitCodeError) Unwrap() error { return e.err }
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var coded *exitCodeError
+	if errors.As(err, &coded) {
+		return coded.code
+	}
+	return 1
+}
+
+type repeatedFlag []string
+
+func (values *repeatedFlag) String() string { return strings.Join(*values, ",") }
+func (values *repeatedFlag) Set(value string) error {
+	*values = append(*values, value)
+	return nil
+}
+
+func validateRestoredDatabase(path string) error {
+	store, err := lab.Open(path)
+	if err != nil {
+		return fmt.Errorf("restored database is not usable: %w", err)
+	}
+	defer store.DB.Close()
+	if err = store.CheckSchema(context.Background()); err != nil {
+		return fmt.Errorf("restored database schema: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|serve|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab --dir PATH")
+		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "private Custodia data directory")
@@ -35,28 +77,118 @@ func run() error {
 	gatewayConfig := f.String("gateway-config", "", "Ozal assertion configuration (public key references only)")
 	subject := f.String("subject", "", "opaque subject (synthetic only for laboratory commands)")
 	connections := f.String("connections", "", "comma-separated allowed connection IDs")
-	output := f.String("out", "", "new private credential file")
+	output := f.String("out", "", "new private credential file or backup destination")
+	from := f.String("from", "", "backup file to restore")
 	addr := f.String("listen", "127.0.0.1:8000", "numeric loopback address")
 	connectionID := f.String("connection", "", "laboratory sync connection ID")
-	baseURL := f.String("url", "", "numeric-loopback HTTP inventory base URL")
-	collection := f.String("collection", "", "normalized collection: users or devices")
+	connector := f.String("connector", "http-inventory-v1", "read-only connector: http-inventory-v1 or cyberark-pam-safes-v1")
+	baseURL := f.String("url", "", "numeric-loopback HTTP source or authorized probe HTTPS base URL")
+	collection := f.String("collection", "", "normalized collection: users, devices, safes, safe_members, accounts, platforms, psm_servers, psm_connectors or platform_psm_links")
 	scope := f.String("scope", "", "explicit extraction scope for baseline comparison")
-	generation := f.String("generation", "http-inventory-v1", "data contract generation")
+	generation := f.String("generation", "", "data contract generation; defaults to the connector name")
 	pageSize := f.Int("page-size", 100, "bounded page size")
 	maxPages := f.Int("max-pages", 100, "bounded page count")
 	maxRecords := f.Int("max-records", 10000, "bounded record count")
+	intervalMinutes := f.Int("interval-minutes", 0, "automatic schedule in minutes; 0 disables it")
 	grants := f.String("grant", "", "comma-separated laboratory subjects with read/run access")
 	canRun := f.Bool("can-run", true, "grant the explicit sync run capability")
+	probeAuthorized := f.Bool("authorized", false, "explicit owner authorization for this exact probe tenant")
+	probeAuth := f.String("auth", "bearer", "probe auth mode: bearer, oauth-client-credentials or mtls")
+	credentialRef := f.String("credential-ref", "", "bearer credential reference: env:NAME, file:ABSOLUTE_PATH or secret:NAME")
+	probeTokenURL := f.String("token-url", "", "OAuth token endpoint URL")
+	probeClientIDRef := f.String("client-id-ref", "", "OAuth client ID reference")
+	probeClientSecretRef := f.String("client-secret-ref", "", "OAuth client secret reference")
+	probeClientCert := f.String("client-cert-file", "", "absolute client certificate path for mTLS")
+	probeClientKey := f.String("client-key-file", "", "absolute client private key path for mTLS")
+	probeScopes := repeatedFlag{}
+	f.Var(&probeScopes, "oauth-scope", "OAuth scope (repeatable)")
+	caFile := f.String("ca-file", "", "optional local CA bundle for the probe")
+	probeTimeout := f.Duration("timeout", 15*time.Second, "probe timeout per endpoint")
+	probeEndpoints := repeatedFlag{}
+	f.Var(&probeEndpoints, "endpoint", "read-only probe endpoint (repeatable)")
 	if err := f.Parse(os.Args[2:]); err != nil {
 		return err
 	}
-	if *dir == "" {
+	if *dir == "" && os.Args[1] != "probe-pam" {
 		return fmt.Errorf("--dir is required")
 	}
 	if strings.HasSuffix(os.Args[1], "-lab") && *gatewayConfig != "" {
 		return fmt.Errorf("laboratory commands cannot use --gateway-config")
 	}
 	switch os.Args[1] {
+	case "probe-pam":
+		plan, err := probe.NewPlan(probe.Config{
+			BaseURL: *baseURL, AuthMode: *probeAuth, CredentialRef: *credentialRef,
+			TokenURL: *probeTokenURL, ClientIDRef: *probeClientIDRef, ClientSecretRef: *probeClientSecretRef,
+			Scopes: []string(probeScopes), ClientCertFile: *probeClientCert, ClientKeyFile: *probeClientKey,
+			CAFile: *caFile, Endpoints: []string(probeEndpoints), Authorized: *probeAuthorized, Timeout: *probeTimeout,
+		})
+		if err != nil {
+			return &exitCodeError{code: 2, err: err}
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		report, err := probe.RunPlan(ctx, plan)
+		if err != nil {
+			return &exitCodeError{code: 2, err: err}
+		}
+		encoded, err := report.SanitizedJSON()
+		if err != nil {
+			return &exitCodeError{code: 2, err: err}
+		}
+		fmt.Println(string(encoded))
+		if failed := report.Failed(); failed > 0 {
+			return &exitCodeError{code: 1, err: fmt.Errorf("%d probe endpoint(s) failed", failed)}
+		}
+		return nil
+	case "backup":
+		if *output == "" {
+			return fmt.Errorf("--out is required")
+		}
+		source, err := filepath.Abs(filepath.Join(*dir, "state.db"))
+		if err != nil {
+			return err
+		}
+		if _, err = os.Stat(source); err != nil {
+			return err
+		}
+		destination, err := filepath.Abs(*output)
+		if err != nil {
+			return err
+		}
+		if err = sqlitebackup.Backup(context.Background(), source, destination); err != nil {
+			return err
+		}
+		fmt.Println("Backup written:", destination)
+		return nil
+	case "restore":
+		if *from == "" {
+			return fmt.Errorf("--from is required")
+		}
+		info, err := os.Stat(*dir)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("restore directory must already exist")
+		}
+		directory, err := filepath.Abs(*dir)
+		if err != nil {
+			return err
+		}
+		source, err := filepath.Abs(*from)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(directory, "state.db")
+		if err = sqlitebackup.Restore(context.Background(), source, destination); err != nil {
+			return err
+		}
+		if err = validateRestoredDatabase(destination); err != nil {
+			os.Remove(destination)
+			os.Remove(destination + "-wal")
+			os.Remove(destination + "-shm")
+			return err
+		}
+		fmt.Println("Backup restored:", destination)
+		return nil
 	case "init", "init-lab":
 		if err := os.Mkdir(*dir, 0700); err != nil {
 			return fmt.Errorf("refusing existing or inaccessible directory: %w", err)
@@ -164,9 +296,12 @@ func run() error {
 			return err
 		}
 		source := lab.SyncSource{
-			ConnectionID: *connectionID, Connector: "http-inventory-v1", BaseURL: *baseURL,
+			ConnectionID: *connectionID, Connector: *connector, BaseURL: *baseURL,
 			Collection: *collection, Scope: *scope, Generation: *generation,
-			PageSize: *pageSize, MaxPages: *maxPages, MaxRecords: *maxRecords,
+			PageSize: *pageSize, MaxPages: *maxPages, MaxRecords: *maxRecords, Interval: *intervalMinutes,
+		}
+		if source.Generation == "" {
+			source.Generation = source.Connector
 		}
 		grantList := []string{}
 		if *grants != "" {
@@ -294,12 +429,23 @@ func run() error {
 			}
 		}
 		srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 3 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+		workerCtx, stopWorker := context.WithCancel(context.Background())
+		workerDone := make(chan struct{})
+		go func() {
+			defer close(workerDone)
+			s.RunSyncWorker(workerCtx, 2*time.Second)
+		}()
+		defer func() {
+			stopWorker()
+			<-workerDone
+		}()
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		go func() {
 			<-ctx.Done()
-			// The laboratory executes a bounded sync inside the request. Give
-			// it enough time to write its terminal audit before closing SQLite.
+			stopWorker()
+			// Give an in-flight bounded sync time to write its terminal audit
+			// before the HTTP server and SQLite close.
 			shutdown, cancel := context.WithTimeout(context.Background(), 2*time.Minute+30*time.Second)
 			defer cancel()
 			srv.Shutdown(shutdown)

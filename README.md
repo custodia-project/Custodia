@@ -169,9 +169,15 @@ from; Custodia is not affiliated with them.
 
 The first self-hosted installation targets single-instance SQLite on local disk.
 The [Go laboratory](server/README.md) implements synthetic people/coverage reads
-and a first bounded read-only HTTP inventory sync against a local synthetic
-source; real authentication, provider connectors and a distributable
-application remain pending. Run `npm run verify:go` for the backend checks.
+and bounded read-only HTTP inventory sync for normalized users/devices,
+CyberArk PAM Safes, Safe members, non-secret account metadata, the platform
+catalog, the PSM server/connector catalogs and explainable platform↔PSM links
+against local fixtures, with a background worker and per-connection schedule;
+real authentication, provider credentials and a distributable application
+remain pending. Run `npm run verify:go` for the backend checks.
+`npm run verify:go:ops` exercises online SQLite backup, restore on a disposable
+instance and the self-hosted package manifest; `npm run package:go` builds the
+binary, web assets and SHA-256 manifest without publishing.
 
 The explicit `serve` mode now verifies per-request Ozal identity assertions
 and supports host-side bootstrap of the first administrator.

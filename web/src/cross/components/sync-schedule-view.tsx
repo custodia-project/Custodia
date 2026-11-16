@@ -19,7 +19,9 @@ function sourceLabel(source: string): string {
 }
 
 export function SyncScheduleView({ permissions, onUnauthorized }: { permissions: string[]; onUnauthorized?: () => void }) {
-  const canManage = permissions.includes('access:manage');
+  // The backend authorizes schedule changes per connection with the same
+  // explicit run capability used to start a sync.
+  const canManage = permissions.includes('access:manage') || permissions.includes('ingestion:run');
   const canRun = permissions.includes('ingestion:run');
   const [rows, setRows] = useState<SyncTaskSchedule[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});

@@ -6,6 +6,199 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Backup/restore SQLite y paquete autohospedado — 16/11
+
+Se agregó `server/internal/sqlitebackup` y los comandos `backup`/`restore`.
+El backup usa `VACUUM INTO` sobre una conexión separada, de modo que no
+modifica la base fuente y puede ejecutarse con el servicio en marcha. El
+restore valida integridad y claves foráneas, copia a un temporal en el
+directorio destino, lo sincroniza, lo enlaza sin sobrescribir y vuelve a
+verificar integridad y esquema. El directorio destino debe existir y no tener
+`state.db`; el token de laboratorio, la configuración de gateway y los
+secretos se provisionan fuera del backup.
+
+`scripts/package-go.mjs` construye un paquete con binario Go,
+`web/` compilado, READMEs, `LICENSE`, documentación y `manifest.json` con
+SHA-256 por archivo, además de un `.tar.gz`. No incluye bases, tokens,
+fixtures, `.env` ni configuración local. `npm run verify:go:ops` construye y
+extrae el paquete en un host descartable, verifica el manifiesto, instala,
+ejecuta la migración dos veces, hace backup con el servicio en marcha,
+restaura en otra instancia, reinicia y autentica contra la instancia
+restaurada y comprueba la web/API empaquetadas. No toca servicios activos ni
+publica nada.
+
+Verificación: `go test -race ./internal/sqlitebackup ./cmd/custodia` y
+`npm run verify:go:ops`. Límites: sin aceptación real, TLS/secretos de
+producción, upgrade ni despliegue.
+
+## Probe TLS de lectura contra fixture — 16/11
+
+Se implementó el transporte del probe autorizado en
+`server/internal/probe` y el comando `custodia probe-pam`, sin contactar
+ningún tenant. `RunPlan` soporta bearer, OAuth client-credentials y mTLS.
+Resuelve referencias `env:`/`file:` y `secret:` desde
+`CUSTODIA_PROBE_SECRET_DIR` fuera del repositorio, usa TLS verificado con
+mínimo TLS 1.2 y CA adicional opcional, rechaza redirects, limita cuerpo a
+1 MiB y timeout por endpoint, y devuelve un reporte saneado por endpoint con
+estado, duración, cantidad de objetos y código estable. El CLI emite ese JSON y
+distingue códigos de salida `0` (todo `200`), `1` (fallo de endpoint con
+reporte) y `2` (plan/credencial/autenticación/CA inválidos). La aceptación
+contra un tenant y el contrato real de scopes siguen pendientes.
+
+Verificación: `go test -race ./internal/probe` usa
+`httptest.NewTLSServer` y un servidor mTLS con CA temporal. Cubre
+autorización explícita, URLs HTTPS sin usuario/query/path, endpoints
+allowlisted, timeout, resolución `env:`/`file:`/`secret:`, OAuth
+client-credentials, mTLS, redirect rechazado, 401/403/429, cuerpo excesivo,
+JSON inválido, content type incorrecto, CA no confiable y ausencia de
+token/cuerpo/clave en el JSON saneado. `go test ./cmd/custodia` prueba el CLI
+con bearer `env:`/`file:`, OAuth con `secret:`, mTLS y los códigos de salida
+`0`, `1` y `2`; una prueba de binario compilado verifica el código de proceso
+real.
+
+## Adaptador CyberArk PAM Safes, miembros, cuentas, plataformas, catálogos PSM y vínculos contra fixture — 16/11
+
+Se agregó el segundo conector de lectura, `cyberark-pam-safes-v1`, con las
+formas documentadas de CyberArk `/API/Safes`,
+`/API/Safes/{safeName}/Members`, `/API/Accounts`, `/API/Platforms`,
+`/API/PSM/Servers` y `/API/PSM/Connectors` extraídas de DS Hub. El adaptador
+`server/internal/adapters/cyberarkpam` lee `value[]`/`count`/`nextLink` o
+catálogos `[...]`/`Total`, limita página, cuerpo, timeout y cursor, no sigue
+redirecciones ni envía credenciales/cookies, y sólo acepta un origen HTTP
+numérico de loopback en este tramo. El `nextLink` se restringe al mismo origen
+y al path esperado; un destino externo, otro path, fragmento o usuario falla
+con `foreign_cursor`. La colección normalizada `safes` tiene allowlist de
+metadatos y valida número de Safe positivo, URLs, booleanos, retenciones y
+epochs RFC3339. Se descartan secretos y cualquier campo fuera de la allowlist.
+
+La colección `safe_members` enumera `/API/Safes` completo y luego pagina los
+miembros de cada Safe. El cursor opaco lleva el índice de Safe y el `nextLink`
+del proveedor; un cursor que cambie de Safe u origen se rechaza. La allowlist
+es `safeNumber`, `safeName`, `memberId`, `memberName`, `memberType`,
+`membershipExpirationDate`, `isExpiredMembershipEnable`, `isPredefinedUser`,
+`isReadOnly` y `permissions`; el ID externo es `safeNumber:memberId` y los
+permisos se guardan como objeto JSON acotado. El adaptador valida el total de
+miembros por Safe al cerrar su lista y el total agregado al cerrar la
+colección: una lista corta o un total cambiante falla sin publicar. Un Safe
+sin miembros sólo acredita cero con `value:[]` y `count:0` explícitos.
+
+La colección `accounts` pagina `/API/Accounts` y resuelve el Safe padre por
+nombre contra la enumeración acotada. La allowlist es `account_id`,
+`safe_number`/`safe_name`, `account_name`, `user_name`, `address`,
+`platform_id`, `account_type`, `category`, `automatic_management_enabled`,
+`management_status` y `secret_modified_at`; el ID externo es
+`safeNumber:accountId`. El subconjunto `secretManagement` se reduce a esos
+tres campos y se excluyen contraseñas, `platformAccountProperties`,
+`manualManagementReason`, `lastModifiedBy`, `secretType` y el payload. Una
+cuenta sin Safe visible o sin ID se omite y produce el aviso
+`skipped_accounts`; el runner termina `partial`, publica lo leído y no retira
+cuentas ni reemplaza la línea base. Una lista completa con total inconsistente
+falla sin publicar.
+
+La colección `platforms` lee `/API/Platforms`, que el contrato verificado
+entrega `{Platforms:[...], Total:N}` en una sola respuesta. El adaptador
+valida `Total` contra la lista y sirve páginas locales acotadas con cursor
+propio, sin inventar parámetros de paginación del proveedor. La allowlist es
+`general.id` (ID externo), `general.name` (o el ID como fallback),
+`general.active`, `general.platformBaseID`, `general.platformType`,
+`general.systemType` y `sessionManagement.PSMServerID`. Se excluyen
+`properties`, políticas, reglas de contraseña y el payload. El detalle
+`/API/Platforms/{id}` y `Details.AllowedSafes` quedan fuera de este tramo;
+`psm_server_id` es una referencia textual sin arista PSM.
+
+Los catálogos `psm_servers` y `psm_connectors` leen
+`/API/PSM/Servers?limit=1000` y `/API/PSM/Connectors?limit=1000`, validan
+`Total` contra la lista y sirven páginas locales acotadas. La allowlist de
+servidor es `ID` (externo), `Name` (fallback al ID) y `Address`; la de conector
+es `ID` (externo) y `DisplayName` (fallback al ID). Se excluyen propiedades,
+capacidad, salud y el payload. Los catálogos no crean relaciones: el cruce de
+`psm_server_id` contra `psm_servers` queda pendiente.
+
+`platform_psm_links` cruza en una corrida la referencia
+`sessionManagement.PSMServerID` de cada plataforma contra `psm_servers`.
+`exact` coincide literalmente; `casefold` resuelve un único ID que difiere
+sólo en mayúsculas; `ambiguous` detecta dos o más IDs distintos que difieren
+sólo en mayúsculas y publica la fila sin objetivo; `missing` conserva la
+referencia cruda y la marca. El ID externo es `platformID:referencePSMID`; la
+allowlist es `platform_id`, `platform_name`, `reference_psm_id`,
+`psm_server_id`, `psm_server_name` y `resolution`. Una fila ambigua no es una
+arista, es evidencia de la omisión; una faltante no inventa un servidor. Sólo
+una corrida completa retira vínculos cuya referencia desapareció; parcial y
+fallida no retiran. El cruce no usa nombres de plataforma, prefijos ni
+similitud.
+
+El runner acepta `Page.Expected` y falla la corrida si el total reportado por
+el proveedor no coincide con lo leído o cambia entre páginas; esa comprobación
+cubre Safes, miembros, cuentas, plataformas y catálogos PSM. También acumula
+avisos de página y convierte la corrida en `partial` para que un registro
+omitido nunca autorice retiros. La configuración exige el par
+conector/colección (`cyberark-pam-safes-v1` con `safes`, `safe_members`,
+`accounts`, `platforms`, `psm_servers` o `psm_connectors`;
+`http-inventory-v1` sólo con `users`/`devices`) y el CLI infiere la generación
+del conector cuando se omite. `source_system` se deriva del conector:
+`cyberark` para PAM, `netskope` para el laboratorio normalizado; las etapas
+por fuente se filtran por ese valor.
+
+Verificación: `npm run verify:go` incluye pruebas del adaptador (paginación de
+Safes, miembros, cuentas, plataformas, catálogos PSM y vínculos; total
+incompleto/cambiante; nextLink externo/repetido/cruzado; 401/403/429/5xx;
+allowlist/epochs/permisos; `secretManagement`; cuentas omitidas; resoluciones
+exact/casefold/missing/ambiguous; cero confirmado; redirects; content type) y
+pruebas end-to-end en `lab` con worker, publicación, procedencia, parcial sin
+retiro, retiro sólo tras corrida completa, aislamiento de historial y permisos.
+`npm run verify:go:web` levanta ocho conexiones fixture (usuarios, Safes PAM,
+miembros, cuentas, plataformas, servidores PSM, conectores PSM y vínculos
+plataforma↔PSM), ejecuta sync desde la UI y por API, comprueba 2 páginas/3
+registros en Safes, 4 páginas/4 miembros, 2 páginas/3 cuentas, 2 páginas/3
+plataformas, 2 páginas/3 servidores PSM, 2 páginas/2 conectores PSM, 2
+páginas/3 vínculos, el aislamiento `scope=cyberark`, la allowlist sin secretos
+y la agenda.
+
+Límites: no hay credenciales, TLS, probe, tenant real ni aceptación; el
+detalle de plataforma y `AllowedSafes` no se leen todavía. La cadena completa
+`users → roles → safes → platforms → psm` y el probe/TLS autorizado quedan
+pendientes. El adaptador usa los contratos CyberArk, pero el tramo es un
+fixture loopback y no acredita soporte del fabricante ni cierra
+`PROD-REAL-001`.
+
+## Worker, agenda y UI de sincronización — 16/11
+
+La migración aditiva 6 agrega `interval_minutes` por conexión sync sin tocar
+las migraciones 1–5. `serve` y `serve-lab` inician un worker en segundo plano:
+reclama la corrida `queued` más antigua, mantiene heartbeat y lease cada 30 s,
+reencola leases vencidos y procesa de a una corrida para conservar el orden de
+escritura de SQLite. La API ya no ejecuta la extracción dentro del POST: el
+pedido devuelve 202 con la corrida durable y la UI la consulta.
+
+El scheduler usa el intervalo por conexión (`0` deshabilita; `5–525600`
+minutos). Cuando no hay corrida activa y pasó el intervalo desde el último
+intento, encola con actor `system:scheduler`; un fallo se reintenta en el
+siguiente intervalo. No hay todavía backoff exponencial, prioridad por fuente
+ni pool de workers. `PUT /api/ingestion/schedules/{connection}` persiste y
+audita `sync_schedule`; `GET /api/ingestion/schedules` devuelve intervalo,
+frescura, intervalos desde el último éxito y próximo intento.
+
+Se completaron los contratos que consume la UI: `POST /api/ingestion/all/runs`,
+`POST` y `PUT` de agenda por conexión, `GET
+/api/ingestion/sources/{source}/stages/latest` y `/history`. `auth/status`
+anuncia `ingestion:run` cuando el principal tiene lectura y `can_run` en al
+menos una conexión; la vista de agenda acepta esa capacidad para editar el
+intervalo y el menú de usuario inicia una sincronización real. La UI conserva
+los estados `queued/running/completed/partial/failed`, la evidencia por
+registro y la agenda.
+
+Verificación: `npm run verify:go` pasó con vet, race y build; incluye worker,
+scheduler, fencing, agenda, `/all/runs`, etapas y permisos.
+`npm run verify:go:web` pasó con UI real, Go, SQLite y un servidor HTTP local
+sintético: inició sync desde el menú, esperó la corrida, comprobó 2 páginas/3
+registros, consultó procedencia, encoló `/all/runs`, guardó el intervalo y
+verificó `ingestion:run`. `verify:go:gateway` conservó la regresión de Ozal.
+`npm run verify` pasó con documentos y 477 unitarias web.
+
+Límites: worker único sin backoff/pool, agenda por conexión, sin proveedor
+real, sin revisión humana por HTTP, sin administración de conexiones/probe y
+sin despliegue. El orden de dos corridas del mismo segundo no es significativo.
+
 ## Sincronización HTTP de laboratorio — 16/11
 
 Primer conector de lectura acotado sobre el laboratorio Go; no cierra
@@ -29,13 +222,14 @@ un error de transporte o cancelación después de páginas deja sólo lo
 recolectado como corrida parcial, con avisos max_pages/max_records y sin
 inferir retiros. Un cursor repetido se rechaza.
 
-La migración 5 es aditiva y conserva las anteriores: fuentes sync con
-conector fijo http-inventory-v1, concesiones can_run por principal, corridas
-durables con clave de idempotencia por solicitante y conexión, una sola
-corrida activa por conexión, líneas base por conexión/colección y revisiones
-humanas en tabla separada; lab_observations suma estado y procedencia
-(first/last run, scope, generación, retiro). Cada corrida guarda la URL base
-del enqueue. La publicación es transaccional y auditada en cada transición:
+La migración 5 es aditiva y conserva las anteriores: fuentes sync con un
+conector registrado, concesiones can_run por principal, corridas durables con
+clave de idempotencia por solicitante y conexión, una sola corrida activa por
+conexión, líneas base por conexión/colección y revisiones humanas en tabla
+separada; lab_observations suma estado y procedencia (first/last run, scope,
+generación, retiro). Cada corrida guarda la URL base del enqueue. En esa
+entrega el único conector era `http-inventory-v1`; el tramo de Safes PAM sumó
+`cyberark-pam-safes-v1` sin cambiar la migración. La publicación es transaccional y auditada en cada transición:
 una corrida completed con igual scope y generación que la línea base puede dar
 de baja ausencias; una parcial actualiza observaciones pero nunca retira ni
 reemplaza la línea base; una fallida no publica observaciones ni reemplaza la
@@ -75,10 +269,11 @@ retiros comparables, parcial sin bajas, fallo atómico, idempotencia por
 conexión, una corrida activa por conexión, fencing por worker/intento tras
 lease vencido, revalidación de fuente y permisos antes de publicar,
 aislamiento de dos conexiones, revisiones que sobreviven al refresco, esquema
-que rechaza versiones futuras) y la API HTTP de sync. npm run verify pasó. El
-gate de navegador no ejercita los recorridos de ingesta y no se repitió la
-suite amplia e2e de web: sus ocho residuales siguen registrados en
-PROD-VERIFY-001 y no se presentan como regresiones nuevas ni como suite verde.
+que rechaza versiones futuras) y la API HTTP de sync. npm run verify pasó. En
+esa entrega el gate de navegador no ejercitaba ingesta; la entrega de
+worker/agenda agrega esa cobertura. No se repitió la suite amplia e2e de web:
+sus ocho residuales siguen registrados en PROD-VERIFY-001 y no se presentan
+como regresiones nuevas ni como suite verde.
 No hay conector real ni
 proveedor, agenda programada, API administrativa de concesiones ni endpoint
 de revisiones; el source_system reportado no acredita Netskope. No se
@@ -86,10 +281,11 @@ acredita una instancia real de Ozal ni despliegue. Sin commit, push,
 publicación ni servicios modificados.
 
 **Cierre del tramo (16/11):** adaptador HTTP sintético, persistencia,
-publicación, autorización y pruebas de laboratorio cerrados. Fuera de este
-cierre quedan el worker asíncrono y los retries con backoff, la configuración
-administrativa/UI, el adaptador de un proveedor real, la aceptación contra
-Ozal real y el despliegue.
+publicación, autorización y pruebas de laboratorio cerrados. El worker, la
+agenda y la UI se completaron en la entrega «Worker, agenda y UI» de arriba;
+siguen fuera los retries con backoff/pool, el adaptador de un proveedor real,
+la administración de conexiones, la aceptación contra Ozal real y el
+despliegue.
 
 ## Receptor Ozal y administrador inicial — 16/11
 

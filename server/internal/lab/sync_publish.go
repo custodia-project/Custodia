@@ -298,7 +298,7 @@ func (s *Store) loadSyncSource(ctx context.Context, connectionID string) (SyncSo
 	return scanSyncSource(s.DB.QueryRowContext(ctx, syncSourceSelect, connectionID))
 }
 
-const syncSourceSelect = `SELECT connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,created_by,created_at
+const syncSourceSelect = `SELECT connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,created_by,created_at
 	FROM lab_sync_sources WHERE connection_id=?`
 
 func loadSyncSourceTx(ctx context.Context, tx *sql.Tx, connectionID string) (SyncSource, error) {
@@ -309,7 +309,7 @@ func scanSyncSource(row rowScanner) (SyncSource, error) {
 	var source SyncSource
 	var enabled int
 	err := row.Scan(&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
-		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.CreatedBy, &source.CreatedAt)
+		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval, &source.CreatedBy, &source.CreatedAt)
 	source.Enabled = enabled == 1
 	return source, err
 }

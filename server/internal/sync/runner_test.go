@@ -18,9 +18,11 @@ type fakeCall struct {
 }
 
 type fakePage struct {
-	objects []inventory.Object
-	next    string
-	err     error
+	objects  []inventory.Object
+	next     string
+	expected int
+	warnings []string
+	err      error
 }
 
 type fakeSource struct {
@@ -43,7 +45,7 @@ func (source *fakeSource) FetchPage(ctx context.Context, collection, cursor stri
 	if page.err != nil {
 		return inventory.Page{}, page.err
 	}
-	return inventory.Page{Objects: page.objects, NextCursor: page.next}, nil
+	return inventory.Page{Objects: page.objects, NextCursor: page.next, Expected: page.expected, Warnings: page.warnings}, nil
 }
 
 func userObject(id, email string) inventory.Object {
@@ -601,4 +603,44 @@ func TestFetchBoundsErrorDetail(t *testing.T) {
 	if strings.Contains(outcome.ErrorDetail, "secret-payload") {
 		t.Fatal("detail was not truncated")
 	}
+}
+
+func TestFetchPageWarningsFinishPartial(t *testing.T) {
+	source := &fakeSource{pages: []fakePage{{
+		objects:  []inventory.Object{userObject("u1", "a@acme.example")},
+		warnings: []string{"skipped_records", "skipped_records"},
+	}}}
+	outcome := Fetch(context.Background(), source, "users", Limits{}, nil)
+	requireStatus(t, outcome, inventory.StatusPartial, "")
+	requireObjectIDs(t, outcome.Objects, "u1")
+	if len(outcome.Warnings) != 1 || outcome.Warnings[0] != "skipped_records" {
+		t.Fatal(outcome.Warnings)
+	}
+}
+
+func TestFetchChecksProviderReportedTotal(t *testing.T) {
+	source := &fakeSource{pages: []fakePage{
+		{objects: []inventory.Object{userObject("u1", "a@acme.example")}, next: "next", expected: 2},
+		{objects: []inventory.Object{userObject("u2", "b@acme.example")}, expected: 2},
+	}}
+	outcome := Fetch(context.Background(), source, "users", Limits{}, nil)
+	requireStatus(t, outcome, inventory.StatusCompleted, "")
+	requireObjectIDs(t, outcome.Objects, "u1", "u2")
+
+	source = &fakeSource{pages: []fakePage{
+		{objects: []inventory.Object{userObject("u1", "a@acme.example")}, expected: 2},
+	}}
+	outcome = Fetch(context.Background(), source, "users", Limits{}, nil)
+	requireFailedWithoutObjects(t, outcome, "incomplete_collection")
+
+	source = &fakeSource{pages: []fakePage{
+		{objects: []inventory.Object{userObject("u1", "a@acme.example")}, next: "next", expected: 2},
+		{objects: []inventory.Object{userObject("u2", "b@acme.example")}, expected: 3},
+	}}
+	outcome = Fetch(context.Background(), source, "users", Limits{}, nil)
+	requireFailedWithoutObjects(t, outcome, "total_changed")
+
+	source = &fakeSource{pages: []fakePage{{expected: -1}}}
+	outcome = Fetch(context.Background(), source, "users", Limits{}, nil)
+	requireFailedWithoutObjects(t, outcome, "invalid_total")
 }

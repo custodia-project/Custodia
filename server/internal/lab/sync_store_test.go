@@ -90,6 +90,10 @@ func TestSyncMigrationIsAdditiveAndIdempotent(t *testing.T) {
 	if err := s.DB.QueryRow("SELECT count(*) FROM pragma_table_info('lab_sync_runs') WHERE name='source_url'").Scan(&runColumns); err != nil || runColumns != 1 {
 		t.Fatal("missing run source_url", err, runColumns)
 	}
+	var intervalColumns int
+	if err := s.DB.QueryRow("SELECT count(*) FROM pragma_table_info('lab_sync_sources') WHERE name='interval_minutes'").Scan(&intervalColumns); err != nil || intervalColumns != 1 {
+		t.Fatal("missing source interval", err, intervalColumns)
+	}
 	// The seeded capture and its normalized observations survive the upgrade.
 	var observations int
 	if err := s.DB.QueryRow("SELECT count(*) FROM lab_observations WHERE connection_id=? AND status='active'", NetskopeConnection).Scan(&observations); err != nil || observations == 0 {
@@ -119,7 +123,7 @@ func TestSyncMigrationUpgradesExistingObservations(t *testing.T) {
 		"ALTER TABLE lab_observations DROP COLUMN last_run_id",
 		"ALTER TABLE lab_observations DROP COLUMN first_run_id",
 		"ALTER TABLE lab_observations DROP COLUMN status",
-		"DELETE FROM lab_schema_migrations WHERE version=5",
+		"DELETE FROM lab_schema_migrations WHERE version IN (5,6)",
 	} {
 		if _, err := s.DB.Exec(statement); err != nil {
 			t.Fatal(statement, err)
@@ -746,6 +750,106 @@ func TestSyncFinishRechecksSourceAndRequester(t *testing.T) {
 	}
 }
 
+func TestSyncWorkerProcessesQueuedRun(t *testing.T) {
+	s, p, _, _ := newSyncHTTPLabMode(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.RunSyncWorker(ctx, 10*time.Millisecond)
+	}()
+	runID, err := s.EnqueueSyncRun(ctx, p, "lab-http-a", "", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := waitForTerminal(t, s, p, runID)
+	cancel()
+	<-done
+	if run.Status != "completed" || run.Pages != 2 || run.Received != 3 || run.HeartbeatAt == "" || run.LeaseExpires == "" {
+		t.Fatal(run)
+	}
+	var starts, completes int
+	if err = s.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE action='sync_start'").Scan(&starts); err != nil || starts == 0 {
+		t.Fatal("worker did not audit start", err, starts)
+	}
+	if err = s.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE action='sync_complete'").Scan(&completes); err != nil || completes == 0 {
+		t.Fatal("worker did not audit completion", err, completes)
+	}
+}
+
+func TestSyncSchedulerEnqueuesDueSources(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	s, p := newSyncStore(t, now)
+	addSyncSource(t, s, p, "lab-http-a", "users", "scope-a", now)
+	if _, err := s.DB.Exec("UPDATE lab_sync_sources SET interval_minutes=5 WHERE connection_id='lab-http-a'"); err != nil {
+		t.Fatal(err)
+	}
+	count, err := s.ScheduleDueSyncRuns(ctx, now, "system:scheduler")
+	if err != nil || count != 1 {
+		t.Fatal(err, count)
+	}
+	var triggered string
+	if err = s.DB.QueryRow("SELECT requested_by FROM lab_sync_runs WHERE connection_id='lab-http-a'").Scan(&triggered); err != nil || triggered != "system:scheduler" {
+		t.Fatal(err, triggered)
+	}
+	if count, err = s.ScheduleDueSyncRuns(ctx, now, "system:scheduler"); err != nil || count != 0 {
+		t.Fatal("scheduler duplicated an active run", err, count)
+	}
+	// Release the active run and age it past the interval.
+	if _, err = s.DB.Exec("UPDATE lab_sync_runs SET status='failed',completed_at=? WHERE connection_id='lab-http-a'", now.Add(-10*time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if count, err = s.ScheduleDueSyncRuns(ctx, now, "system:scheduler"); err != nil || count != 1 {
+		t.Fatal("scheduler did not enqueue after interval", err, count)
+	}
+	if _, err = s.DB.Exec("UPDATE lab_sync_sources SET interval_minutes=0 WHERE connection_id='lab-http-a'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec("UPDATE lab_sync_runs SET status='failed',completed_at=? WHERE status='queued'", now.Add(-10*time.Minute).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	if count, err = s.ScheduleDueSyncRuns(ctx, now, "system:scheduler"); err != nil || count != 0 {
+		t.Fatal("disabled schedule enqueued", err, count)
+	}
+}
+
+func TestSyncScheduleUpdateAndCapabilities(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	s, p := newSyncStore(t, now)
+	addSyncSource(t, s, p, "lab-http-a", "users", "scope-a", now)
+	if err := s.SetSyncSchedule(ctx, p, "lab-http-a", 15, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSyncSchedule(ctx, p, "lab-http-a", 3, now); err == nil {
+		t.Fatal("interval below five accepted")
+	}
+	if allowed, err := s.SyncCanRun(ctx, p, "lab-http-a"); err != nil || !allowed {
+		t.Fatal("run capability missing", err)
+	}
+	if any, err := s.SyncCanRunAny(ctx, p); err != nil || !any {
+		t.Fatal("any run capability missing", err)
+	}
+	rows, err := s.SyncSchedules(ctx, p, now)
+	if err != nil || len(rows) != 1 || rows[0].IntervalMinutes != 15 || rows[0].Freshness != "unknown" {
+		t.Fatal(err, rows)
+	}
+	var audits int
+	if err = s.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE action='sync_schedule'").Scan(&audits); err != nil || audits != 1 {
+		t.Fatal("schedule change was not audited", err, audits)
+	}
+	if err = s.GrantSync(ctx, "host", "custodia-lab", p.Subject, "lab-http-a", false, now); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := s.SyncCanRun(ctx, p, "lab-http-a"); err != nil || allowed {
+		t.Fatal("revoked run capability still allowed", err)
+	}
+	if any, err := s.SyncCanRunAny(ctx, p); err != nil || any {
+		t.Fatal("revoked any-run capability still allowed", err)
+	}
+}
+
 func TestSyncSchedulesKeepLastSuccessAndCountFailures(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
@@ -753,7 +857,7 @@ func TestSyncSchedulesKeepLastSuccessAndCountFailures(t *testing.T) {
 	addSyncSource(t, s, p, "lab-http-a", "users", "scope-a", now)
 	runSync(t, s, p, "lab-http-a", now, syncResult{Status: inventory.StatusCompleted, Pages: 1})
 	runSync(t, s, p, "lab-http-a", now.Add(time.Minute), syncResult{Status: inventory.StatusFailed, ErrorCode: "timeout"})
-	rows, err := s.SyncSchedules(ctx, p)
+	rows, err := s.SyncSchedules(ctx, p, now)
 	if err != nil || len(rows) != 1 {
 		t.Fatal(err, rows)
 	}

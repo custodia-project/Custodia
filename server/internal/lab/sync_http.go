@@ -1,7 +1,6 @@
 package lab
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -80,7 +79,7 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			fail(405, "Cambiar la agenda aún no está migrado.")
 			return true
 		}
-		schedules, err := s.SyncSchedules(r.Context(), principal)
+		schedules, err := s.SyncSchedules(r.Context(), principal, current)
 		if err != nil {
 			fail(503, "No se pudo consultar el estado autorizado.")
 			return true
@@ -91,67 +90,174 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 		}
 		send(200, map[string]any{"rows": rows})
 		return true
-	case strings.HasPrefix(path, "schedules/") && strings.HasSuffix(path, "/runs"):
-		connectionID := strings.TrimSuffix(strings.TrimPrefix(path, "schedules/"), "/runs")
+	case strings.HasPrefix(path, "schedules/"):
+		rest := strings.TrimPrefix(path, "schedules/")
+		if strings.HasSuffix(rest, "/runs") {
+			connectionID := strings.TrimSuffix(rest, "/runs")
+			if connectionID == "" || strings.Contains(connectionID, "/") {
+				fail(404, "Conexión de sincronización no encontrada.")
+				return true
+			}
+			if r.Method != "POST" {
+				fail(405, "Usá POST para iniciar una sincronización.")
+				return true
+			}
+			if err := validateEmptySyncBody(w, r); err != nil {
+				fail(400, "El pedido de sincronización no admite opciones en este recorrido.")
+				return true
+			}
+			idempotency, err := idempotencyKey(r)
+			if err != nil {
+				fail(400, "La clave de idempotencia no es válida.")
+				return true
+			}
+			runID, err := s.EnqueueSyncRun(r.Context(), principal, connectionID, idempotency, current)
+			if errors.Is(err, ErrDenied) {
+				if sources, listErr := s.SyncSourcesFor(r.Context(), principal); listErr == nil {
+					for _, source := range sources {
+						if source.ConnectionID == connectionID {
+							fail(403, "Permiso para iniciar esta sincronización insuficiente.")
+							return true
+						}
+					}
+				}
+				fail(404, "Conexión de sincronización no encontrada.")
+				return true
+			}
+			if errors.Is(err, ErrSyncActive) {
+				if _, err = s.requeueExpiredSyncRuns(r.Context(), connectionID, principal.Actor(), current); err != nil {
+					fail(503, "No se pudo revisar la cola de sincronización.")
+					return true
+				}
+				active, activeErr := s.activeSyncRun(r.Context(), connectionID)
+				if activeErr != nil || active.Status != "queued" {
+					fail(409, "La conexión ya tiene una corrida en cola o en curso.")
+					return true
+				}
+				runID = active.RunID
+			} else if err != nil {
+				fail(503, "No se pudo encolar la sincronización.")
+				return true
+			}
+			// The worker owns the execution; the API only returns the durable
+			// queued run so the UI can poll it.
+			send(202, map[string]any{"run_id": runID, "status": "queued"})
+			return true
+		}
+		connectionID := rest
 		if connectionID == "" || strings.Contains(connectionID, "/") {
 			fail(404, "Conexión de sincronización no encontrada.")
 			return true
 		}
-		if r.Method != "POST" {
-			fail(405, "Usá POST para iniciar una sincronización.")
+		if r.Method != "PUT" {
+			fail(405, "Usá PUT para cambiar la agenda.")
 			return true
 		}
-		if err := validateEmptySyncBody(w, r); err != nil {
-			fail(400, "El pedido de sincronización no admite opciones en este recorrido.")
-			return true
-		}
-		idempotency, err := idempotencyKey(r)
+		interval, err := syncScheduleBody(w, r)
 		if err != nil {
-			fail(400, "La clave de idempotencia no es válida.")
+			fail(400, err.Error())
 			return true
 		}
-		// A new explicit request also reclaims an abandoned lease. The queued
-		// run is resumed below instead of creating a duplicate.
-		runID, err := s.EnqueueSyncRun(r.Context(), principal, connectionID, idempotency, current)
-		if errors.Is(err, ErrDenied) {
-			if sources, listErr := s.SyncSourcesFor(r.Context(), principal); listErr == nil {
-				for _, source := range sources {
-					if source.ConnectionID == connectionID {
-						fail(403, "Permiso para iniciar esta sincronización insuficiente.")
-						return true
-					}
-				}
-			}
-			fail(404, "Conexión de sincronización no encontrada.")
+		if err = s.SetSyncSchedule(r.Context(), principal, connectionID, interval, current); errors.Is(err, ErrDenied) {
+			fail(403, "Permiso para administrar esta agenda insuficiente.")
 			return true
-		}
-		if errors.Is(err, ErrSyncActive) {
-			if _, err = s.requeueExpiredSyncRuns(r.Context(), connectionID, principal.Actor(), current); err != nil {
-				fail(503, "No se pudo revisar la cola de sincronización.")
-				return true
-			}
-			active, activeErr := s.activeSyncRun(r.Context(), connectionID)
-			if activeErr != nil || active.Status != "queued" {
-				fail(409, "La conexión ya tiene una corrida en cola o en curso.")
-				return true
-			}
-			runID = active.RunID
 		} else if err != nil {
-			fail(503, "No se pudo encolar la sincronización.")
+			fail(503, "No se pudo guardar la agenda.")
 			return true
 		}
-		worker := newSyncWorkerID()
-		processCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Minute)
-		_ = s.ProcessSyncRun(processCtx, runID, worker, time.Now)
-		cancel()
-		// The durable queue owns the outcome: a worker/audit failure is
-		// evidence in the run history, not a reason to hide the accepted run.
-		run, err := s.SyncRun(r.Context(), principal, runID)
+		send(200, map[string]any{"updated": true, "task_key": connectionID, "interval_minutes": interval})
+		return true
+	case path == "all/runs":
+		if r.Method != "POST" {
+			fail(405, "Usá POST para encolar la sincronización.")
+			return true
+		}
+		if err := validateAllSyncBody(w, r); err != nil {
+			fail(400, "El pedido de sincronización no es válido.")
+			return true
+		}
+		scope := r.URL.Query().Get("scope")
+		if scope != "" && scope != "all" && scope != "cyberark" {
+			fail(400, "Alcance de sincronización inválido.")
+			return true
+		}
+		sources, err := s.SyncSourcesFor(r.Context(), principal)
 		if err != nil {
-			send(202, map[string]any{"run_id": runID, "status": "queued"})
+			fail(503, "No se pudo consultar el alcance de sincronización.")
 			return true
 		}
-		send(202, map[string]any{"run_id": runID, "status": run.Status})
+		runs := []map[string]any{}
+		anyRunnable := false
+		for _, source := range sources {
+			allowed, runErr := s.SyncCanRun(r.Context(), principal, source.ConnectionID)
+			if runErr != nil {
+				fail(503, "No se pudo consultar el permiso de sincronización.")
+				return true
+			}
+			if !allowed {
+				continue
+			}
+			anyRunnable = true
+			if scope == "cyberark" && syncSourceSystem(source) != "cyberark" {
+				continue
+			}
+			runID, enqueueErr := s.EnqueueSyncRun(r.Context(), principal, source.ConnectionID, "", current)
+			if errors.Is(enqueueErr, ErrSyncActive) {
+				continue
+			}
+			if enqueueErr != nil {
+				continue
+			}
+			runs = append(runs, map[string]any{
+				"run_id": runID, "status": "queued", "source_system": syncSourceSystem(source),
+				"task_key": source.ConnectionID,
+			})
+		}
+		if !anyRunnable {
+			fail(403, "Permiso para iniciar sincronizaciones insuficiente.")
+			return true
+		}
+		send(202, map[string]any{"runs": runs})
+		return true
+	case strings.HasPrefix(path, "sources/") && strings.Contains(path, "/stages/"):
+		rest := strings.TrimPrefix(path, "sources/")
+		parts := strings.Split(rest, "/stages/")
+		if len(parts) != 2 || (parts[1] != "history" && parts[1] != "latest") {
+			fail(404, "Recorrido de etapas no encontrado.")
+			return true
+		}
+		if r.Method != "GET" {
+			fail(405, "Lectura de etapas de sólo lectura.")
+			return true
+		}
+		if parts[0] != "netskope" && parts[0] != "cyberark" {
+			send(200, map[string]any{"rows": []any{}})
+			return true
+		}
+		if parts[1] == "history" {
+			limit := 10
+			if raw := r.URL.Query().Get("runs"); raw != "" {
+				value, err := strconv.Atoi(raw)
+				if err != nil || value < 1 || value > 50 {
+					fail(400, "Límite de etapas inválido.")
+					return true
+				}
+				limit = value
+			}
+			runs, err := s.SyncRuns(r.Context(), principal, 100)
+			if err != nil {
+				fail(503, "No se pudo consultar el historial autorizado.")
+				return true
+			}
+			send(200, map[string]any{"rows": syncStageHistoryJSON(runs, parts[0], limit)})
+			return true
+		}
+		schedules, err := s.SyncSchedules(r.Context(), principal, current)
+		if err != nil {
+			fail(503, "No se pudo consultar la frescura autorizada.")
+			return true
+		}
+		send(200, map[string]any{"rows": syncStageLatestJSON(schedules, parts[0])})
 		return true
 	case strings.HasPrefix(path, "connections/") && strings.HasSuffix(path, "/records"):
 		connectionID := strings.TrimSuffix(strings.TrimPrefix(path, "connections/"), "/records")
@@ -234,13 +340,20 @@ func syncRunJSON(run SyncRun) map[string]any {
 			errorCount = 1
 		}
 	}
+	receivedSafes, receivedMembers := 0, 0
+	switch run.Collection {
+	case "safes":
+		receivedSafes = run.Received
+	case "safe_members":
+		receivedMembers = run.Received
+	}
 	return map[string]any{
-		"run_id": run.RunID, "source_system": "netskope", "source_file": "http-inventory:" + run.ConnectionID,
+		"run_id": run.RunID, "source_system": syncSourceSystemForConnector(run.Connector), "source_file": syncSourceFile(run.Connector, run.ConnectionID),
 		"task_key": run.ConnectionID, "connection_id": run.ConnectionID, "collection": run.Collection,
 		"scope": run.Scope, "generation": run.Generation, "status": run.Status,
 		"enqueued_at": run.EnqueuedAt, "started_at": optional(run.StartedAt), "completed_at": optional(run.CompletedAt),
 		"status_message": run.StatusMessage, "heartbeat_at": optional(run.HeartbeatAt), "lease_expires_at": optional(run.LeaseExpires),
-		"attempt_count": run.AttemptCount, "expected_safe_count": nil, "received_safe_count": 0, "received_member_count": 0,
+		"attempt_count": run.AttemptCount, "expected_safe_count": nil, "received_safe_count": receivedSafes, "received_member_count": receivedMembers,
 		"received_object_count": run.Received, "received_relationship_count": 0, "retired_object_count": run.Retired,
 		"retired_relationship_count": 0, "retained_object_count": run.Retained, "duplicate_row_count": run.DuplicateRows,
 		"pages": run.Pages, "error_count": errorCount, "error_details": details, "error_code": run.ErrorCode,
@@ -292,16 +405,119 @@ func syncStageRows(run SyncRun) []map[string]any {
 }
 
 func syncScheduleJSON(schedule SyncSchedule) map[string]any {
+	intervalSource := "global_default"
+	var adminOverride any
+	if schedule.IntervalMinutes > 0 {
+		intervalSource = "administrative"
+		adminOverride = schedule.IntervalMinutes
+	}
 	return map[string]any{
 		"task_key": schedule.ConnectionID, "source_system": schedule.SourceSystem,
-		"source_file": "http-inventory:" + schedule.ConnectionID, "configured": schedule.Enabled,
-		"active": schedule.Active, "interval_minutes": 0, "interval_source": "global_default",
-		"admin_override": nil, "updated_at": nil, "last_success_at": optional(schedule.LastSuccessAt),
+		"source_file": syncSourceFile(schedule.Connector, schedule.ConnectionID), "configured": schedule.Enabled,
+		"active": schedule.Active, "interval_minutes": schedule.IntervalMinutes, "interval_source": intervalSource,
+		"admin_override": adminOverride, "updated_at": nil, "last_success_at": optional(schedule.LastSuccessAt),
 		"last_attempt_at": optional(schedule.LastAttemptAt), "last_status": optional(schedule.LastStatus),
-		"consecutive_failures": schedule.ConsecutiveFailure, "freshness": "unknown",
-		"intervals_since_success": nil, "stale_after_intervals": 3, "next_scheduled_at": nil,
-		"collection": schedule.Collection, "scope": schedule.Scope,
+		"consecutive_failures": schedule.ConsecutiveFailure, "freshness": schedule.Freshness,
+		"intervals_since_success": schedule.IntervalsSince, "stale_after_intervals": schedule.StaleAfterIntervals,
+		"next_scheduled_at": optional(schedule.NextScheduledAt),
+		"collection":        schedule.Collection, "scope": schedule.Scope,
 	}
+}
+
+func syncStageHistoryJSON(runs []SyncRun, source string, limit int) []map[string]any {
+	rows := []map[string]any{}
+	for _, run := range runs {
+		if syncSourceSystemForConnector(run.Connector) != source {
+			continue
+		}
+		if run.Status != "completed" && run.Status != "partial" && run.Status != "failed" {
+			continue
+		}
+		if run.CompletedAt == "" {
+			continue
+		}
+		if len(rows) >= limit {
+			break
+		}
+		status := "failed"
+		if run.Status == "completed" {
+			status = "completed"
+		}
+		var itemCount any
+		if run.Status != "failed" {
+			itemCount = run.Received
+		}
+		var duration int64
+		if run.StartedAt != "" {
+			if start, errStart := time.Parse(time.RFC3339, run.StartedAt); errStart == nil {
+				if end, errEnd := time.Parse(time.RFC3339, run.CompletedAt); errEnd == nil && !end.Before(start) {
+					duration = end.Sub(start).Milliseconds()
+				}
+			}
+		}
+		rows = append(rows, map[string]any{
+			"run_id": run.RunID, "completed_at": run.CompletedAt, "stage": "extract",
+			"status": status, "item_count": itemCount, "duration_ms": duration,
+		})
+	}
+	return rows
+}
+
+func syncStageLatestJSON(schedules []SyncSchedule, source string) []map[string]any {
+	rows := []map[string]any{}
+	for _, schedule := range schedules {
+		if schedule.SourceSystem != source || schedule.LastAttemptAt == "" || schedule.Active {
+			continue
+		}
+		status := "failed"
+		if schedule.LastStatus == "completed" {
+			status = "completed"
+		}
+		rows = append(rows, map[string]any{
+			"stage": "extract", "last_success_at": optional(schedule.LastSuccessAt),
+			"last_status": status, "last_attempt_at": schedule.LastAttemptAt,
+		})
+	}
+	return rows
+}
+
+func syncScheduleBody(w http.ResponseWriter, r *http.Request) (int, error) {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
+	decoder.DisallowUnknownFields()
+	var payload struct {
+		IntervalMinutes *float64 `json:"interval_minutes"`
+	}
+	if err := decoder.Decode(&payload); err != nil {
+		return 0, errors.New("La agenda requiere interval_minutes.")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return 0, errors.New("La agenda tiene datos adicionales.")
+	}
+	if payload.IntervalMinutes == nil {
+		return 0, nil
+	}
+	value := *payload.IntervalMinutes
+	if value != float64(int(value)) || (value != 0 && (value < 5 || value > 525600)) {
+		return 0, errors.New("Usá 0 para deshabilitar o un intervalo de al menos 5 minutos.")
+	}
+	return int(value), nil
+}
+
+func validateAllSyncBody(w http.ResponseWriter, r *http.Request) error {
+	if r.Body == nil {
+		return nil
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	var payload map[string]any
+	if err := decoder.Decode(&payload); err != nil && err != io.EOF {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return errors.New("trailing sync options")
+	}
+	return nil
 }
 
 func validateEmptySyncBody(w http.ResponseWriter, r *http.Request) error {

@@ -9,8 +9,10 @@ Las credenciales siguen siendo sintéticas y locales. La autorización ya se
 resuelve desde principales habilitados y concesiones de lectura por conexión
 en SQLite; una credencial no concede acceso universal a las fuentes.
 El primer adaptador de sincronización de lectura es `http-inventory-v1`, sólo
-para un servidor HTTP sintético en loopback; no acredita soporte de Netskope,
-CyberArk ni otro fabricante.
+para un servidor HTTP sintético en loopback; no acredita soporte de Netskope.
+El segundo, `cyberark-pam-safes-v1`, implementa el contrato `/API/Safes` de
+PAM contra un fixture loopback: tampoco acredita un tenant CyberArk real ni
+usa credenciales o TLS en este tramo.
 
 Desde la raíz:
 
@@ -53,6 +55,46 @@ Las bases inicializadas con el primer laboratorio requieren ejecutar
 `custodia migrate-lab --dir /ruta/al/laboratorio` antes de servir. La migración
 aditiva no cambia la captura existente y el arranque rechaza versiones
 incompatibles; el servidor no aplica migraciones silenciosas.
+
+## Backup, restore y paquete
+
+El backup usa `VACUUM INTO` sobre una conexión separada, por lo que puede
+ejecutarse con el servicio en marcha y no modifica la base fuente. El restore
+verifica integridad y claves foráneas antes de copiar, escribe un temporal en
+el directorio destino, lo sincroniza y lo enlaza sin sobrescribir una base
+existente. No incluye `lab.token`, configuración de gateway ni secretos.
+
+```sh
+/tmp/custodia backup --dir /tmp/custodia-lab --out /tmp/custodia-backup.db
+mkdir -m 700 /tmp/custodia-restored
+/tmp/custodia restore --dir /tmp/custodia-restored --from /tmp/custodia-backup.db
+```
+
+El directorio destino debe existir y no contener `state.db`. Para un modo
+laboratorio hay que provisionar el `lab.token` por separado; para una
+instalación real, la configuración de gateway y la clave pública también se
+provisionan fuera del backup.
+
+El paquete autohospedado se construye sin publicar:
+
+```sh
+npm run package:go
+```
+
+Genera un directorio y un `.tar.gz` con el binario Go, `web/` compilado,
+READMEs, `LICENSE`, documentación y `manifest.json` con SHA-256 por archivo.
+No incluye bases, tokens, fixtures, `.env` ni configuración local. El gate
+descartable comprueba backup con el servicio en ejecución, restore, arranque
+autenticado de la instancia restaurada y manifiesto del paquete:
+
+```sh
+npm run verify:go:ops
+```
+
+El gate extrae el paquete en un host descartable, verifica el manifiesto,
+instala, ejecuta la migración dos veces, hace backup con el servicio en marcha,
+restaura en otra instancia, reinicia y autentica contra la instancia restaurada
+y comprueba la web/API empaquetadas.
 
 ```sh
 npm run verify:go:web
@@ -127,9 +169,10 @@ La sincronización HTTP de laboratorio registra fuentes con límites acotados y
 publica observaciones con procedencia; la aceptación de una instancia real de
 Ozal y recorridos de ingesta en navegador siguen pendientes. OIDC genérico
 queda pendiente.
-La distribución final deberá incluir frontend, instrucciones de configuración,
-versionado y backup/restore consistente de SQLite; no se anuncia todavía una
-versión descargable para producción.
+La distribución incluye frontend, binario, documentación y manifiesto
+SHA-256 con `npm run package:go`; el paquete es reproducible en instancias
+descartables pero no se publica ni se anuncia todavía como versión de
+producción. La aceptación real de Ozal y del tenant sigue pendiente.
 
 ## Sincronización HTTP de laboratorio
 
@@ -139,12 +182,80 @@ numérico de loopback, con colección, scope y generación explícitos:
 ```sh
 /tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection lab-http-a \
   --url http://127.0.0.1:18080 --collection users --scope scope-a \
-  --grant synthetic-lab
+  --interval-minutes 15 --grant synthetic-lab
 ```
 
 El registro rechaza orígenes que no sean http numérico de loopback,
-colecciones no soportadas (users/devices), scope ausente y conexiones
-duplicadas, y audita configuración y concesiones en la misma transacción.
+colecciones no soportadas, el par conector/colección incorrecto, scope ausente,
+intervalos distintos de 0 o menores a 5 minutos y conexiones duplicadas, y
+audita configuración y concesiones en la misma transacción. `0` deshabilita la
+agenda automática. Los pares válidos son `http-inventory-v1` con
+`users`/`devices` y `cyberark-pam-safes-v1` con `safes`, `safe_members`,
+`accounts`, `platforms`, `psm_servers`, `psm_connectors` o
+`platform_psm_links`. Si se omite, `--generation` toma el nombre del conector.
+
+El segundo conector implementa las formas documentadas de CyberArk
+`GET /API/Safes`, `GET /API/Safes/{safeName}/Members`, `GET /API/Accounts`,
+`GET /API/Platforms`, `GET /API/PSM/Servers` y `GET /API/PSM/Connectors`,
+más el cruce local `platform_psm_links`, contra un fixture local, sin
+credenciales ni TLS:
+
+```sh
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-safes \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection safes --scope synthetic-safes-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-members \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection safe_members --scope synthetic-members-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-accounts \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection accounts --scope synthetic-accounts-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-platforms \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection platforms --scope synthetic-platforms-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-servers \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection psm_servers --scope synthetic-psm-servers-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-connectors \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection psm_connectors --scope synthetic-psm-connectors-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+/tmp/custodia add-http-lab --dir /tmp/custodia-lab --connection pam-psm-links \
+  --connector cyberark-pam-safes-v1 --url http://127.0.0.1:18080 \
+  --collection platform_psm_links --scope synthetic-psm-links-v1 --generation cyberark-pam-safes-v1 \
+  --page-size 2 --grant synthetic-lab
+```
+
+Para Safes, miembros y cuentas lee `value[]`, `count` y `nextLink`; para
+plataformas, servidores PSM y conectores PSM lee la lista y `Total` en una sola
+respuesta y sirve páginas locales acotadas. Exige que el cursor permanezca en
+el mismo origen y path, y publica sólo las allowlists de Safe, miembro, cuenta,
+plataforma, servidor PSM y conector PSM. Los Safes guardan nombre, URL ID,
+ubicación, creador, OLAC, retenciones, auto-purge, creación, última
+modificación, descripción, CPM y miembro expirado. Los miembros guardan Safe
+padre, `memberId`, nombre, tipo, expiración, flags y `permissions` como objeto
+JSON. Las cuentas guardan Safe padre, `accountId`, nombre, usuario, dirección,
+plataforma, tipo, categoría y sólo
+`secretManagement.{automaticManagementEnabled,status,lastModifiedTime}`. Las
+plataformas guardan ID, nombre, activo, plataforma base, tipo, sistema y
+`PSMServerID` textual. Los servidores PSM guardan `ID`, `Name` y `Address`; los
+conectores guardan `ID` y `DisplayName`. `platform_psm_links` cruza la
+referencia de cada plataforma contra `psm_servers`: `exact`, `casefold`,
+`ambiguous` o `missing`, con `platformID:referencePSMID` como ID externo. Una
+fila ambigua se publica sin objetivo; una faltante conserva el ID crudo. No
+lee contraseñas, `platformAccountProperties`, `manualManagementReason`,
+`lastModifiedBy`, `secretType`, `properties` ni el payload. Un `Total`/`count`
+incompleto o cambiante falla la corrida; una página posterior con error deja
+`partial` sin retirar Safes, miembros, cuentas, plataformas ni catálogos PSM.
+Una cuenta sin Safe visible o sin ID se omite y deja la corrida `partial` con
+`skipped_accounts`, sin retiros. Sólo una corrida completa retira vínculos
+cuya referencia desapareció. Los catálogos PSM no crean relaciones por sí
+mismos; el cruce explicable es la colección `platform_psm_links`.
 Las concesiones distinguen lectura de arranque de corridas (can_run) y sólo
 se otorgan sobre principales habilitados existentes; no hay API administrativa
 pública todavía. Para un lector existente:
@@ -159,12 +270,20 @@ para iniciar corridas. Ambas operaciones quedan auditadas en el host y no
 existe todavía una pantalla de administración.
 
 Rutas de /api/ingestion: corridas GET con límite acotado, corrida por ID y sus
-etapas, agendas con último éxito y fallos consecutivos, registros por conexión
-con filtros collection/status, y POST schedules/{id}/runs con cuerpo vacío e
-Idempotency-Key acotada para encolar una corrida (409 si ya hay una running con
-lease vigente; una queued o vencida se retoma, 403 sin can_run, 404 sin revelar
-conexiones ocultas). La corrida se ejecuta en el mismo pedido pero queda
-registrada como durable antes de la primera llamada externa.
+etapas, agendas con intervalo, frescura y fallos consecutivos, registros por
+conexión con filtros collection/status, y POST schedules/{id}/runs con cuerpo
+vacío e Idempotency-Key acotada para encolar una corrida (409 si ya hay una
+running con lease vigente; una queued o vencida se retoma, 403 sin can_run,
+404 sin revelar conexiones ocultas). `POST /api/ingestion/all/runs` encola las
+conexiones ejecutables; `PUT /api/ingestion/schedules/{id}` cambia el intervalo
+y `GET /api/ingestion/sources/{source}/stages/latest|history` expone la
+frescura derivada filtrada por `netskope` o `cyberark`. La corrida la ejecuta
+el worker de `serve`/`serve-lab`; el POST sólo devuelve 202 y la UI consulta el
+estado. El worker reclama de a una, renueva heartbeat/lease cada 30 s, reencola
+vencidas y aplica el scheduler por intervalo. `auth/status` anuncia
+`ingestion:run` cuando el principal tiene lectura y can_run. `source_system`
+se deriva del conector: `cyberark` para Safes PAM y `netskope` para el
+laboratorio normalizado; esto no acredita un tenant real.
 
 La publicación es transaccional y auditada. Una corrida completed con el
 mismo scope y generación que la línea base puede dar de baja ausencias; una
@@ -177,9 +296,11 @@ con el actor que la solicita. Las decisiones humanas viven en una tabla
 separada que la sincronización no escribe, sin endpoint todavía. Antes de
 publicar se revalida la fuente (URL, scope, generación, habilitación) y las
 concesiones del solicitante; un cambio falla sin escribir. No hay conector
-real, credenciales de proveedor ni agenda programada: la frescura se reporta,
-no se infiere. El campo `source_system` se reporta como `netskope` sólo por el
-contrato tipado de la UI; no acredita un conector de ese fabricante.
+real ni credenciales de proveedor: los adaptadores PAM usan los contratos
+CyberArk sólo contra un fixture loopback sin TLS. La agenda es por conexión y
+un fallo se reintenta en el siguiente intervalo, sin backoff exponencial ni
+pool. `source_system` se deriva del conector (`cyberark` para PAM, `netskope`
+para el laboratorio normalizado); no acredita un tenant real.
 
 El servidor local responde
 `GET {base}/v1/collections/{collection}?limit=N&cursor=OPACO` con

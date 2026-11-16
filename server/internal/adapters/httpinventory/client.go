@@ -118,7 +118,7 @@ func parseBaseURL(raw string) (*url.URL, error) {
 // FetchPage reads one bounded page of a supported collection. An empty cursor
 // starts at the beginning; an empty response cursor asserts completion.
 func (c *Client) FetchPage(ctx context.Context, collection, cursor string, limit int) (inventory.Page, error) {
-	if _, found := inventory.CollectionFor(collection); !found {
+	if collection != "users" && collection != "devices" {
 		return inventory.Page{}, &inventory.Error{Code: "unsupported_collection", Detail: "unsupported inventory collection"}
 	}
 	if limit < minPageLimit || limit > maxPageLimit {

@@ -108,6 +108,7 @@ func Fetch(ctx context.Context, source Source, collection string, limits Limits,
 	requested := make(map[string]struct{})
 	pages := 0
 	cursor := ""
+	expected := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return failFromError(err, pages, collection, collected, warnings)
@@ -133,6 +134,21 @@ func Fetch(ctx context.Context, source Source, collection string, limits Limits,
 		if len(page.Objects) > limits.PageSize {
 			return failedOutcome("page_too_large", fmt.Sprintf("inventory page has %d objects; page size is %d", len(page.Objects), limits.PageSize), pages)
 		}
+		if page.Expected < 0 {
+			return failedOutcome("invalid_total", "inventory source reported a negative total", pages)
+		}
+		if page.Expected > 0 {
+			if expected != 0 && page.Expected != expected {
+				return failedOutcome("total_changed", "inventory source changed its reported total during the run", pages)
+			}
+			expected = page.Expected
+		}
+		for _, warning := range page.Warnings {
+			if warning == "" || containsWarning(warnings, warning) {
+				continue
+			}
+			warnings = append(warnings, warning)
+		}
 		pages++
 
 		if len(collected)+len(page.Objects) > limits.MaxRecords {
@@ -154,7 +170,16 @@ func Fetch(ctx context.Context, source Source, collection string, limits Limits,
 		}
 
 		if page.NextCursor == "" {
-			return finalize(collection, inventory.StatusCompleted, pages, collected, warnings, "", "")
+			if expected > 0 && expected != len(collected) {
+				return failedOutcome("incomplete_collection", fmt.Sprintf("inventory source reported %d objects and returned %d", expected, len(collected)), pages)
+			}
+			status := inventory.StatusCompleted
+			if len(warnings) > 0 {
+				// Adapter warnings such as skipped records are not a complete
+				// snapshot: publish what was read, but never retire absences.
+				status = inventory.StatusPartial
+			}
+			return finalize(collection, status, pages, collected, warnings, "", "")
 		}
 		if detail := cursorValidationDetail(page.NextCursor); detail != "" {
 			return failedOutcome("invalid_cursor", detail, pages)
@@ -174,6 +199,15 @@ func reportProgress(progress func(page, received int), pages, received int) {
 	if progress != nil {
 		progress(pages, received)
 	}
+}
+
+func containsWarning(warnings []string, candidate string) bool {
+	for _, warning := range warnings {
+		if warning == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func cursorValidationDetail(cursor string) string {
@@ -211,8 +245,17 @@ func isIntegrityCode(code string) bool {
 		"invalid_email",
 		"invalid_timestamp",
 		"invalid_external_id",
+		"invalid_attribute",
 		"duplicate_conflict",
-		"unsupported_collection":
+		"unsupported_collection",
+		"invalid_total",
+		"total_changed",
+		"incomplete_collection",
+		"foreign_cursor",
+		"invalid_payload",
+		"too_many_safes",
+		"too_many_objects",
+		"duplicate_safe":
 		return true
 	default:
 		return false

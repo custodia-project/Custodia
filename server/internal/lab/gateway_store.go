@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 const ReplayCapacity = 65536
 
 var ErrReplay = errors.New("assertion already used")

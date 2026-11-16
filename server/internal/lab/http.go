@@ -121,6 +121,9 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 			roles = []string{"admin"}
 			roleNames = []string{"Administrador"}
 		}
+		if canRun, err := s.SyncCanRunAny(r.Context(), principal); err == nil && canRun {
+			permissions = append(permissions, "ingestion:run")
+		}
 		send(200, map[string]any{"mode": profile.Mode, "authenticated": true, "permissions": permissions, "api_docs_enabled": false, "user": map[string]any{"actor_id": principal.Actor(), "name": profile.Name, "email": profile.Email, "roles": roles, "role_names": roleNames}})
 
 	case "/api/chains/person/coverage":

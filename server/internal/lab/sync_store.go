@@ -26,11 +26,12 @@ var (
 var connectionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 const (
-	syncConnector      = "http-inventory-v1"
-	syncLeaseDuration  = 15 * time.Minute
-	syncDefaultPages   = 100
-	syncDefaultRecords = 10000
-	syncDefaultPage    = 100
+	syncConnector                 = "http-inventory-v1"
+	syncConnectorCyberArkPAMSafes = "cyberark-pam-safes-v1"
+	syncLeaseDuration             = 15 * time.Minute
+	syncDefaultPages              = 100
+	syncDefaultRecords            = 10000
+	syncDefaultPage               = 100
 )
 
 // SyncSource is one read-only HTTP inventory connection. The URL is
@@ -47,6 +48,7 @@ type SyncSource struct {
 	PageSize     int    `json:"page_size"`
 	MaxPages     int    `json:"max_pages"`
 	MaxRecords   int    `json:"max_records"`
+	Interval     int    `json:"interval_minutes"`
 	CreatedBy    string `json:"created_by"`
 	CreatedAt    string `json:"created_at"`
 }
@@ -60,6 +62,7 @@ type SyncRun struct {
 	Scope         string   `json:"scope"`
 	Generation    string   `json:"generation"`
 	SourceURL     string   `json:"source_url"`
+	Connector     string   `json:"connector"`
 	Status        string   `json:"status"`
 	RequestedBy   string   `json:"requested_by"`
 	EnqueuedAt    string   `json:"enqueued_at"`
@@ -82,19 +85,24 @@ type SyncRun struct {
 	ErrorDetail   string   `json:"error_detail,omitempty"`
 }
 
-// SyncSchedule is the read model for one configured sync connection. The lab
-// does not schedule intervals yet; freshness is reported, not inferred.
+// SyncSchedule is the read model for one configured sync connection.
 type SyncSchedule struct {
-	ConnectionID       string `json:"connection_id"`
-	SourceSystem       string `json:"source_system"`
-	Collection         string `json:"collection"`
-	Scope              string `json:"scope"`
-	Enabled            bool   `json:"enabled"`
-	Active             bool   `json:"active"`
-	LastSuccessAt      string `json:"last_success_at,omitempty"`
-	LastAttemptAt      string `json:"last_attempt_at,omitempty"`
-	LastStatus         string `json:"last_status,omitempty"`
-	ConsecutiveFailure int    `json:"consecutive_failures"`
+	ConnectionID        string   `json:"connection_id"`
+	Connector           string   `json:"connector"`
+	SourceSystem        string   `json:"source_system"`
+	Collection          string   `json:"collection"`
+	Scope               string   `json:"scope"`
+	Enabled             bool     `json:"enabled"`
+	Active              bool     `json:"active"`
+	IntervalMinutes     int      `json:"interval_minutes"`
+	Freshness           string   `json:"freshness"`
+	IntervalsSince      *float64 `json:"intervals_since_success,omitempty"`
+	StaleAfterIntervals int      `json:"stale_after_intervals"`
+	NextScheduledAt     string   `json:"next_scheduled_at,omitempty"`
+	LastSuccessAt       string   `json:"last_success_at,omitempty"`
+	LastAttemptAt       string   `json:"last_attempt_at,omitempty"`
+	LastStatus          string   `json:"last_status,omitempty"`
+	ConsecutiveFailure  int      `json:"consecutive_failures"`
 }
 
 // SyncRecord is one active or retired observation with its provenance.
@@ -243,13 +251,13 @@ func validLabBaseURL(raw string) error {
 func (s *Store) readableSyncSource(ctx context.Context, tx *sql.Tx, principalID int, connectionID string) (SyncSource, error) {
 	var source SyncSource
 	var enabled int
-	err := tx.QueryRowContext(ctx, `SELECT s.connection_id,s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.created_by,s.created_at
+	err := tx.QueryRowContext(ctx, `SELECT s.connection_id,s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.interval_minutes,s.created_by,s.created_at
 		FROM lab_sync_sources s
 		JOIN lab_grants g ON g.connection_id=s.connection_id
 		JOIN lab_principals p ON p.id=g.principal_id AND p.enabled=1
 		WHERE p.id=? AND s.connection_id=?`, principalID, connectionID).Scan(
 		&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
-		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.CreatedBy, &source.CreatedAt,
+		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval, &source.CreatedBy, &source.CreatedAt,
 	)
 	source.Enabled = enabled == 1
 	return source, err
@@ -268,7 +276,7 @@ func (s *Store) canRunSync(ctx context.Context, tx *sql.Tx, principalID int, con
 
 // SyncSourcesFor returns only enabled connections the principal may read.
 func (s *Store) SyncSourcesFor(ctx context.Context, p Principal) ([]SyncSource, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT s.connection_id,s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.created_by,s.created_at
+	rows, err := s.DB.QueryContext(ctx, `SELECT s.connection_id,s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.interval_minutes,s.created_by,s.created_at
 		FROM lab_sync_sources s
 		JOIN lab_grants g ON g.connection_id=s.connection_id
 		JOIN lab_principals p ON p.id=g.principal_id AND p.enabled=1
@@ -282,7 +290,7 @@ func (s *Store) SyncSourcesFor(ctx context.Context, p Principal) ([]SyncSource, 
 		var source SyncSource
 		var enabled int
 		if err = rows.Scan(&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
-			&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.CreatedBy, &source.CreatedAt); err != nil {
+			&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval, &source.CreatedBy, &source.CreatedAt); err != nil {
 			return nil, err
 		}
 		source.Enabled = enabled == 1
@@ -295,13 +303,14 @@ func validateSyncConfiguration(source SyncSource, grants []string) error {
 	if !connectionPattern.MatchString(source.ConnectionID) {
 		return fmt.Errorf("invalid connection ID")
 	}
-	if source.Connector != syncConnector {
+	if source.Connector != syncConnector && source.Connector != syncConnectorCyberArkPAMSafes {
 		return fmt.Errorf("unsupported sync connector")
 	}
 	if err := validLabBaseURL(source.BaseURL); err != nil {
 		return err
 	}
-	if _, found := collectionForSync(source.Collection); !found {
+	collection, found := collectionForSync(source.Collection)
+	if !found || !connectorSupportsCollection(source.Connector, collection) {
 		return fmt.Errorf("unsupported inventory collection")
 	}
 	if strings.TrimSpace(source.Scope) == "" || len(source.Scope) > 128 || strings.ContainsAny(source.Scope, "\r\n") {
@@ -322,6 +331,9 @@ func validateSyncConfiguration(source SyncSource, grants []string) error {
 	if source.PageSize < 1 || source.PageSize > 500 || source.MaxPages < 1 || source.MaxPages > 1000 || source.MaxRecords < source.PageSize || source.MaxRecords > 100000 {
 		return fmt.Errorf("invalid sync limits")
 	}
+	if source.Interval != 0 && (source.Interval < 5 || source.Interval > 525600) {
+		return fmt.Errorf("invalid sync interval")
+	}
 	if len(grants) > 128 {
 		return fmt.Errorf("too many grants")
 	}
@@ -331,10 +343,28 @@ func validateSyncConfiguration(source SyncSource, grants []string) error {
 // collectionForSync exists to keep the lab configuration independent from a
 // future connector registry while still rejecting unknown collections.
 func collectionForSync(name string) (string, bool) {
-	if name == "users" || name == "devices" {
+	switch name {
+	case "users", "devices", "safes", "safe_members", "accounts", "platforms", "psm_servers", "psm_connectors", "platform_psm_links":
 		return name, true
+	default:
+		return "", false
 	}
-	return "", false
+}
+
+// connectorSupportsCollection keeps connector-specific contracts explicit: the
+// synthetic HTTP inventory is users/devices, while the PAM adapter only emits
+// Safes and cannot be pointed at the normalized user fixture.
+func connectorSupportsCollection(connector, collection string) bool {
+	switch connector {
+	case syncConnector:
+		return collection == "users" || collection == "devices"
+	case syncConnectorCyberArkPAMSafes:
+		return collection == "safes" || collection == "safe_members" || collection == "accounts" ||
+			collection == "platforms" || collection == "psm_servers" || collection == "psm_connectors" ||
+			collection == "platform_psm_links"
+	default:
+		return false
+	}
 }
 
 // AddHTTPSource is an explicit laboratory host operation. It creates the
@@ -363,8 +393,8 @@ func (s *Store) AddHTTPSource(ctx context.Context, actor string, source SyncSour
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_connections(id,kind) VALUES(?,?)", source.ConnectionID, "netskope"); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,created_by,created_at)
-		VALUES(?,?,?,?,?,?,1,?,?,?,?,?)`, source.ConnectionID, source.Connector, source.BaseURL, source.Collection, source.Scope, source.Generation, source.PageSize, source.MaxPages, source.MaxRecords, source.CreatedBy, source.CreatedAt); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,created_by,created_at)
+		VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?)`, source.ConnectionID, source.Connector, source.BaseURL, source.Collection, source.Scope, source.Generation, source.PageSize, source.MaxPages, source.MaxRecords, source.Interval, source.CreatedBy, source.CreatedAt); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -392,7 +422,7 @@ func (s *Store) AddHTTPSource(ctx context.Context, actor string, source SyncSour
 	after, _ := json.Marshal(map[string]any{
 		"connection_id": source.ConnectionID, "connector": source.Connector, "base_url": source.BaseURL,
 		"collection": source.Collection, "scope": source.Scope, "generation": source.Generation,
-		"page_size": source.PageSize, "max_pages": source.MaxPages, "max_records": source.MaxRecords,
+		"page_size": source.PageSize, "max_pages": source.MaxPages, "max_records": source.MaxRecords, "interval_minutes": source.Interval,
 	})
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_audit(actor,action,before_json,after_json,at) VALUES(?,'sync_configure','{}',?,?)", actor, after, now.UTC().Format(time.RFC3339)); err != nil {
 		return err
@@ -553,7 +583,9 @@ func (s *Store) claimSyncRun(ctx context.Context, runID, workerID string, now ti
 	return run, nil
 }
 
-const syncRunSelect = `SELECT r.run_id,r.connection_id,r.collection,r.scope,r.generation,r.source_url,r.status,r.requested_by,r.enqueued_at,
+const syncRunSelect = `SELECT r.run_id,r.connection_id,r.collection,r.scope,r.generation,r.source_url,
+ coalesce((SELECT s.connector FROM lab_sync_sources s WHERE s.connection_id=r.connection_id),''),
+ r.status,r.requested_by,r.enqueued_at,
  coalesce(r.started_at,''),coalesce(r.completed_at,''),r.status_message,r.attempt_count,coalesce(r.worker_id,''),
  coalesce(r.heartbeat_at,''),coalesce(r.lease_expires_at,''),r.pages,r.received,r.added,r.changed,r.retired,r.retained,
  r.duplicate_rows,r.warnings_json,r.error_code,r.error_detail FROM lab_sync_runs r`
@@ -565,7 +597,7 @@ type rowScanner interface {
 func scanSyncRun(row rowScanner) (SyncRun, error) {
 	var run SyncRun
 	var warnings []byte
-	if err := row.Scan(&run.RunID, &run.ConnectionID, &run.Collection, &run.Scope, &run.Generation, &run.SourceURL, &run.Status, &run.RequestedBy, &run.EnqueuedAt,
+	if err := row.Scan(&run.RunID, &run.ConnectionID, &run.Collection, &run.Scope, &run.Generation, &run.SourceURL, &run.Connector, &run.Status, &run.RequestedBy, &run.EnqueuedAt,
 		&run.StartedAt, &run.CompletedAt, &run.StatusMessage, &run.AttemptCount, &run.WorkerID, &run.HeartbeatAt, &run.LeaseExpires,
 		&run.Pages, &run.Received, &run.Added, &run.Changed, &run.Retired, &run.Retained, &run.DuplicateRows, &warnings, &run.ErrorCode, &run.ErrorDetail); err != nil {
 		return run, err
@@ -687,20 +719,23 @@ func (s *Store) activeSyncRun(ctx context.Context, connectionID string) (SyncRun
 }
 
 // SyncSchedules returns one read model per readable sync connection. A failed
-// last attempt never erases the last successful timestamp.
-func (s *Store) SyncSchedules(ctx context.Context, p Principal) ([]SyncSchedule, error) {
+// last attempt never erases the last successful timestamp; partial counts as a
+// refresh, matching the Python source_run_history contract.
+func (s *Store) SyncSchedules(ctx context.Context, p Principal, now time.Time) ([]SyncSchedule, error) {
 	sources, err := s.SyncSourcesFor(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	result := []SyncSchedule{}
 	for _, source := range sources {
-		schedule := SyncSchedule{ConnectionID: source.ConnectionID, Collection: source.Collection, Scope: source.Scope, Enabled: source.Enabled, SourceSystem: syncSourceSystem(source)}
+		schedule := SyncSchedule{
+			ConnectionID: source.ConnectionID, Connector: source.Connector, Collection: source.Collection, Scope: source.Scope,
+			Enabled: source.Enabled, SourceSystem: syncSourceSystem(source), IntervalMinutes: source.Interval,
+			StaleAfterIntervals: 3, Freshness: "unknown",
+		}
 		var lastSuccess, lastAttempt sql.NullString
 		var active int
 		var lastStatus sql.NullString
-		// partial counts as a refresh in Python's source_run_history, so the
-		// last_success timestamp includes completed and partial runs.
 		err = s.DB.QueryRowContext(ctx, `SELECT
 			max(completed_at) FILTER (WHERE status IN ('completed','partial')) AS last_success,
 			max(coalesce(completed_at,started_at,enqueued_at)) AS last_attempt,
@@ -722,16 +757,52 @@ func (s *Store) SyncSchedules(ctx context.Context, p Principal) ([]SyncSchedule,
 		schedule.LastAttemptAt = lastAttempt.String
 		schedule.LastStatus = lastStatus.String
 		schedule.ConsecutiveFailure = failures
+		if source.Interval > 0 && lastSuccess.Valid && lastSuccess.String != "" {
+			if success, parseErr := time.Parse(time.RFC3339, lastSuccess.String); parseErr == nil {
+				intervals := now.Sub(success).Hours() / float64(source.Interval)
+				if intervals < 0 {
+					intervals = 0
+				}
+				schedule.IntervalsSince = &intervals
+				schedule.Freshness = "fresh"
+				if intervals > float64(schedule.StaleAfterIntervals) {
+					schedule.Freshness = "stale"
+				}
+			}
+		}
+		if source.Interval > 0 && !schedule.Active {
+			base := now
+			if lastAttempt.Valid && lastAttempt.String != "" {
+				if parsed, parseErr := time.Parse(time.RFC3339, lastAttempt.String); parseErr == nil {
+					base = parsed
+				}
+			}
+			schedule.NextScheduledAt = base.Add(time.Duration(source.Interval) * time.Minute).UTC().Format(time.RFC3339)
+		}
 		result = append(result, schedule)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ConnectionID < result[j].ConnectionID })
 	return result, nil
 }
 
-func syncSourceSystem(SyncSource) string {
+func syncSourceSystem(source SyncSource) string {
+	return syncSourceSystemForConnector(source.Connector)
+}
+
+func syncSourceSystemForConnector(connector string) string {
+	if connector == syncConnectorCyberArkPAMSafes {
+		return "cyberark"
+	}
 	// The typed UI contract groups the normalized user/device inventory under
 	// the netskope label; this does not assert a provider adapter.
 	return "netskope"
+}
+
+func syncSourceFile(connector, connectionID string) string {
+	if connector == syncConnectorCyberArkPAMSafes {
+		return "cyberark-pam-safes:" + connectionID
+	}
+	return "http-inventory:" + connectionID
 }
 
 // SyncRecords returns active or retired observations with provenance. Hidden

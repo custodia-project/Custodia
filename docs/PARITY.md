@@ -80,26 +80,35 @@ siguen pendientes en [el tracker](TO_IMPLEMENT.md).
 
 ## Primera sincronización de inventario — 16/11
 
-Alcance acotado: **una colección normalizada por conexión** (`users` o
-`devices`) leída de un servidor HTTP local sintético. No es un adaptador de
-Netskope, CyberArk ni de ningún fabricante: el contrato de laboratorio es
-`http-inventory-v1`, sólo acepta HTTP numérico loopback y no envía
-credenciales. La unidad persistida sigue siendo **conexión + colección + ID
-externo**, con corrida de procedencia. El campo `source_system` se reporta
-como `netskope` sólo para encajar en el contrato tipado que ya consume la UI;
-no acredita un adaptador de ese fabricante.
+Alcance acotado: **una colección normalizada por conexión**. El conector
+`http-inventory-v1` lee `users` o `devices` de un servidor HTTP local
+sintético y no acredita ningún fabricante. El conector
+`cyberark-pam-safes-v1` implementa los contratos documentados `/API/Safes`,
+`/API/Safes/{safeName}/Members`, `/API/Accounts`, `/API/Platforms`,
+`/API/PSM/Servers` y `/API/PSM/Connectors` de CyberArk PAM contra un fixture
+HTTP loopback, más el cruce `platform_psm_links`: traduce sólo las allowlists
+de Safe, miembro, cuenta no secreta, plataforma, servidor PSM, conector PSM y
+vínculo resuelto, y no lee contraseñas, secretos, propiedades ni el payload
+completo. Tampoco envía credenciales ni usa TLS en este tramo; un tenant real
+requiere el probe autorizado y el perfil de transporte que siguen pendientes. La unidad
+persistida sigue siendo **conexión + colección + ID externo**, con corrida de
+procedencia. `source_system` se deriva del conector: `netskope` para el
+laboratorio normalizado y `cyberark` para Safes PAM.
 
 ### Rutas y contrato HTTP
 
 | Recorrido | Ruta | Implementación y límite |
 |---|---|---|
-| Iniciar corrida | `POST /api/ingestion/schedules/{connection}/runs` | Exige lectura y `can_run` de esa conexión. Persiste `queued` y auditoría `sync_queued` antes de la primera llamada, reclama con lease y audita `sync_start`; el laboratorio ejecuta la extracción en la misma petición y termina en `completed`, `partial` o `failed` con `sync_complete`. 202, 400, 403, 404 o 409 si hay una corrida `running` con lease vigente. Una corrida `queued` o con lease vencido se reencola/retoma en el mismo pedido. |
+| Iniciar corrida | `POST /api/ingestion/schedules/{connection}/runs` | Exige lectura y `can_run` de esa conexión. Persiste `queued` y auditoría `sync_queued` antes de la primera llamada; el worker reclama con lease y audita `sync_start`, y termina en `completed`, `partial` o `failed` con `sync_complete`. 202, 400, 403, 404 o 409 si hay una corrida `running` con lease vigente. Una corrida `queued` o con lease vencido se reencola/retoma con el mismo pedido. |
+| Sincronización completa | `POST /api/ingestion/all/runs?scope=all|cyberark` | Encola una corrida por cada conexión legible con `can_run`; omite las que ya tienen una corrida activa. `scope=cyberark` puede devolver una lista vacía sin error. 202; 403 si el principal no puede ejecutar ninguna conexión. |
 | Historial | `GET /api/ingestion/runs?limit=` | Sólo corridas de conexiones legibles por el principal. No revela totales ni IDs de conexiones ocultas. |
 | Detalle | `GET /api/ingestion/runs/{run_id}` | 404 si la corrida no existe o pertenece a una conexión no autorizada. |
 | Capas | `GET /api/ingestion/runs/{run_id}/stages` | Una capa `extract` derivada de la corrida; no hay tabla de etapas ni telemetría por capa. |
-| Agenda | `GET /api/ingestion/schedules` | Estado por conexión legible: activa, último éxito, último intento, último estado y fallos consecutivos. El último éxito incluye `completed` y `partial` como refresh, igual que la referencia Python; `interval_minutes=0` y `freshness=unknown` porque no hay scheduler. |
+| Etapas por fuente | `GET /api/ingestion/sources/{source}/stages/latest` y `/history?runs=` | Frescura e historial derivados de las corridas sync y filtrados por `source_system` (`netskope` o `cyberark`). Sin payloads. |
+| Agenda | `GET /api/ingestion/schedules` | Estado por conexión legible: activa, intervalo, último éxito, último intento, último estado, fallos consecutivos, frescura y próximo intento. El último éxito incluye `completed` y `partial` como refresh, igual que la referencia Python. |
+| Cambiar agenda | `PUT /api/ingestion/schedules/{connection}` | Intervalo `0` (deshabilitado) o `5–525600` minutos; exige lectura y `can_run`; audita `sync_schedule`. |
 | Registros | `GET /api/ingestion/connections/{connection}/records?status=&collection=&limit=` | Observaciones activas o retiradas con `first_run_id`, `last_run_id`, `scope`, `generation`, `retired_at` y `retired_by_run_id`. |
-| Agenda global | `GET /api/ingestion/schedule` | Devuelve deshabilitada; cambiar agenda y `/api/ingestion/all/runs` siguen sin migrar. |
+| Agenda global | `GET /api/ingestion/schedule` | Respuesta informativa deshabilitada; la agenda real es por conexión. |
 
 ### Reglas trasladadas de Python
 
@@ -181,6 +190,75 @@ recibido. Códigos seguros (no exhaustivos): `http_status_<code>`, `timeout`,
 tiene reintentos, `Retry-After`, paginación por offsets y límites específicos
 de Netskope; Go deliberadamente no implementa esos detalles de proveedor.
 
+El adaptador `cyberarkpam` implementa el contrato PAM verificado en DS Hub:
+`GET /API/Safes?limit=N` devuelve `{"value":[...],"count":N,"nextLink":...}`.
+Sigue `nextLink` sólo si es del mismo origen y permanece en `/API/Safes`; un
+destino externo, otro path, fragmento o usuario se rechaza con
+`foreign_cursor`. `count` es el total esperado: si no coincide con lo leído,
+o cambia entre páginas, la corrida falla y no publica; el runner ahora lleva
+`Page.Expected` con esa comprobación. La allowlist de Safe es `safe_name`,
+`safe_url_id`, `location`, `creator_name`, `olac_enabled`,
+`versions_retention`, `days_retention`, `auto_purge_enabled`, `creation_time`,
+`last_modification_time`, `description`, `managing_cpm` y `expired_member`; el
+ID externo es `safeNumber`. Los epochs se convierten a RFC3339 y los campos
+fuera de la allowlist se descartan. Se excluyen cuentas, secretos y el payload
+completo. Un 401 produce `authentication_failed`, un 403
+`permission_denied`; una página 2 con error conserva lo leído como `partial` y
+no retira Safes ausentes.
+
+La colección `safe_members` enumera primero `/API/Safes` completo y pagina
+`/API/Safes/{safeName}/Members`. El cursor opaco lleva el Safe actual y el
+`nextLink`; se rechaza un cursor que cambie de Safe u origen. La allowlist es
+`safeNumber`, `safeName`, `memberId`, `memberName`, `memberType`,
+`membershipExpirationDate`, `isExpiredMembershipEnable`, `isPredefinedUser`,
+`isReadOnly` y `permissions`; el ID externo es `safeNumber:memberId`. Los
+permisos se guardan como objeto JSON acotado. El adaptador valida el total por
+Safe al terminar su lista y el total agregado al cerrar la colección: una
+lista corta o un total cambiante falla sin publicar. Un error de página
+posterior deja `partial` y no retira miembros.
+
+La colección `accounts` pagina `/API/Accounts` y resuelve el Safe padre por
+nombre contra la enumeración acotada de Safes. La allowlist es `account_id`,
+`safe_number`/`safe_name`, `account_name`, `user_name`, `address`,
+`platform_id`, `account_type`, `category`, `automatic_management_enabled`,
+`management_status` y `secret_modified_at`; el ID externo es
+`safeNumber:accountId`. `secretManagement` se reduce a esos tres campos y se
+excluyen contraseñas, `platformAccountProperties`, `manualManagementReason`,
+`lastModifiedBy`, `secretType` y el payload. Una cuenta sin Safe visible o sin
+ID se omite; el adaptador agrega el aviso `skipped_accounts` y el runner
+termina `partial`, publica lo leído y no retira cuentas ni reemplaza la línea
+base. Una lista completa con total inconsistente falla sin publicar. La
+cadena `users → roles → safes → platforms → psm` y la resolución de nombres
+de plataforma quedan para tramos posteriores.
+
+La colección `platforms` lee `/API/Platforms`, que el contrato verificado
+entrega `{Platforms:[...], Total:N}` en una sola respuesta. El adaptador
+valida `Total` contra la lista y sirve páginas locales acotadas con cursor
+propio, sin inventar parámetros de paginación. La allowlist es `general.id`
+(ID externo), `general.name`, `general.active`, `general.platformBaseID`,
+`general.platformType`, `general.systemType` y
+`sessionManagement.PSMServerID`. Se excluyen `properties`, políticas, reglas
+de contraseña y el payload. `psm_server_id` queda como referencia textual: no
+se cruza todavía con un catálogo PSM ni crea una arista. El detalle
+`/API/Platforms/{id}` y `Details.AllowedSafes` quedan fuera de este tramo.
+
+Los catálogos `psm_servers` y `psm_connectors` leen
+`/API/PSM/Servers?limit=1000` y `/API/PSM/Connectors?limit=1000`, validan
+`Total` y sirven páginas locales acotadas. La allowlist de servidor es `ID`,
+`Name` (fallback al ID) y `Address`; la de conector es `ID` y `DisplayName`
+(fallback al ID). Se excluyen propiedades, capacidad, salud y el payload.
+
+`platform_psm_links` cruza `sessionManagement.PSMServerID` contra
+`psm_servers` en una corrida. `exact` coincide literalmente; `casefold` tiene
+un único ID que difiere sólo en mayúsculas; `ambiguous` tiene dos o más IDs
+distintos que difieren sólo en mayúsculas y se publica sin objetivo;
+`missing` no tiene candidato y conserva el ID crudo. El ID externo es
+`platformID:referencePSMID`; la allowlist es `platform_id`, `platform_name`,
+`reference_psm_id`, `psm_server_id`, `psm_server_name` y `resolution`. Una fila
+`ambiguous` no es una arista, es evidencia de la omisión; una `missing` no
+inventa un servidor del catálogo. Sólo una corrida completa retira vínculos
+cuya referencia desapareció. El cruce no usa nombres, prefijos ni similitud.
+
 ### Autorización y auditoría
 
 La lectura usa `lab_grants`; iniciar una corrida exige además
@@ -190,12 +268,12 @@ oculta en registros da 403. La publicación revalida en su transacción que la
 fuente siga habilitada con la misma URL base, alcance y generación del
 enqueue, y que el solicitante conserve lectura y `can_run`; si cambió, la
 corrida falla con `configuration_changed` o `authorization_revoked` y no
-publica. `auth/status` no convierte una conexión de laboratorio en
-`netskope:read` ni anuncia `ingestion:run`, porque la UI todavía no ofrece el
-recorrido de inicio. Se auditan `sync_configure`, `sync_grant`, `sync_queued`,
-`sync_start`, `sync_complete`, `sync_requeued` y `sync_review` en la misma
-transacción que su cambio. No hay logs operativos ni tabla de etapas; esa
-telemetría sigue pendiente.
+publica. `auth/status` anuncia `ingestion:run` cuando el principal tiene al
+menos una conexión sync legible y habilitada con `can_run`; las conexiones
+sync siguen sin conceder `netskope:read`. Se auditan `sync_configure`,
+`sync_grant`, `sync_schedule`, `sync_queued`, `sync_start`, `sync_complete`,
+`sync_requeued` y `sync_review` en la misma transacción que su cambio. No hay
+logs operativos ni tabla de etapas; esa telemetría sigue pendiente.
 
 ### Diferencias y límites vigentes
 
@@ -203,29 +281,28 @@ telemetría sigue pendiente.
   `UPDATE ... WHERE status='queued'` + `RowsAffected`; el índice único parcial
   impide dos corridas activas por conexión. El fencing usa `worker_id` y
   `attempt_count`: un intento viejo no puede renovar el lease ni publicar
-  después de un requeue o de un nuevo claim. `RequeueExpiredSyncRuns` es
-  explícito; el POST de la conexión usa la variante acotada a esa conexión,
-  audita al llamador y retoma una corrida `queued` o con lease vencido. No hay
-  coordinador ni heartbeat en segundo plano.
-- El laboratorio ejecuta la extracción en la petición HTTP. La cola y el lease
-  son durables, pero un worker asíncrono, reintentos con backoff y recuperación
-  automática después de un crash no están implementados.
+  después de un requeue o de un nuevo claim. El worker corre en el proceso
+  serve, reclama de a una corrida, renueva heartbeat/lease cada 30 s y
+  reencola vencidas; `RequeueExpiredSyncRuns` también queda disponible de
+  forma explícita.
+- La agenda es por conexión: `interval_minutes=0` deshabilita; un valor
+  positivo encola cuando pasa el intervalo desde el último intento. Un fallo
+  se reintenta en el siguiente intervalo; todavía no hay backoff exponencial,
+  política por fuente ni prioridad. El worker es único, no un pool.
 - Una colección por conexión y una corrida activa por conexión. Python usa
   `task_key` y permite tareas hermanas de una fuente; esa separación queda para
   el próximo tramo.
 - Sin conector real, sin secretos, sin TLS, sin probe ni administración de
-  conexiones por API. El adaptador es sólo para servidor local sintético.
-- Sin UI de sincronización: están migrados `GET /api/ingestion/runs`,
-  `GET /api/ingestion/runs/{id}`, `GET /api/ingestion/runs/{id}/stages`,
-  `GET /api/ingestion/schedules`, `GET /api/ingestion/schedule` (deshabilitada)
-  y `POST /api/ingestion/schedules/{id}/runs`, además de
-  `GET /api/ingestion/connections/{id}/records`. Siguen sin migrar
-  `GET /api/ingestion/sources/{source}/stages/history`,
-  `PUT /api/ingestion/schedules/{id}`, `/api/ingestion/all/runs` y las
-  revisiones por HTTP. No se expone `ingestion:run` en `auth/status`, así que
-  los controles de sync de la UI permanecen ocultos. La agenda usa timestamps
-  RFC3339 de segundo y no hay scheduler; el orden de dos corridas del mismo
-  segundo no es significativo.
+  conexiones por API. Los dos adaptadores son de lectura y sólo aceptan un
+  origen HTTP numérico de loopback; el de Safes PAM usa el contrato CyberArk
+  contra un fixture, no contra un tenant.
+- La UI de sync ya inicia, consulta y agenda con los contratos anteriores:
+  `ingestion:run` se anuncia, `/all/runs` encola, la agenda se edita y las
+  etapas por fuente se consultan. `scope=cyberark` aísla las conexiones PAM.
+  Siguen sin migrar las revisiones humanas por HTTP, la administración de
+  conexiones, el probe y los proveedores reales. La agenda usa timestamps
+  RFC3339 de segundo; el orden de dos corridas del mismo segundo no es
+  significativo.
 - Sin relaciones entre objetos ni grafo CMDB; esta primera entrega sólo
   persiste observaciones de una colección y sus bajas por ausencia. La
   publicación carga las observaciones existentes de esa conexión/colección en
@@ -247,7 +324,30 @@ pruebas nuevas incluyen adapter con `httptest`, runner de paginación, dos
 conexiones con el mismo ID externo, página 2 fallida, primera página fallida,
 duplicados idénticos/contradictorios, cursor repetido, cero confirmado,
 repetición, idempotencia por conexión, lease vencido y fencing por intento,
-revalidación de fuente/permisos antes de publicar, revisión humana y permisos
-insuficientes. `verify:go:web` y `verify:go:gateway` se ejecutan como
-regresión de la UI real y del receptor Ozal; no prueban una fuente real ni una
-instalación desplegada.
+revalidación de fuente/permisos antes de publicar, worker y heartbeat,
+scheduler por intervalo, agenda editable, `/all/runs`, etapas por fuente,
+revisión humana y permisos insuficientes. El adaptador PAM agrega paginación
+`value/count/nextLink`, allowlist/epochs, total inconsistente, nextLink
+externo/repetido, 401/403/429/5xx, página 2 parcial, publicación, retiro sólo
+completo, aislamiento `cyberark`/`netskope` y permisos. La colección de
+miembros agrega enumeración de Safes, paginación por Safe, cursor ligado al
+Safe, total por Safe y agregado, allowlist de miembro, publicación, parcialidad
+y retiro sólo completo. La colección de cuentas agrega paginación
+`/API/Accounts`, resolución de Safe por nombre, allowlist sin secretos,
+`secretManagement` saneado, cuentas omitidas con aviso y parcialidad sin
+retiro. La colección de plataformas agrega lista `{Platforms,Total}`,
+paginación local, allowlist, total inconsistente, página acotada parcial y
+permisos. Los catálogos PSM agregan `{PSMServers,Total}` y
+`{PSMConnectors,Total}`, allowlist, total inconsistente, página acotada
+parcial y permisos. El cruce agrega exact/casefold/missing/ambiguous,
+retiro sólo completo, parcial sin retiro y permisos. `verify:go:web` recorre
+además la UI real contra ocho conexiones (usuarios, Safes PAM, miembros,
+cuentas, plataformas, servidores PSM, conectores PSM y vínculos
+plataforma↔PSM): inicia sync desde el menú, espera las corridas, consulta
+registros sin secretos, ejecuta `/all/runs` por alcance y actualiza la agenda;
+`verify:go:gateway` conserva la regresión del receptor Ozal. `go test -race
+./internal/probe` y `go test ./cmd/custodia` cubren el transporte TLS de
+lectura y el comando `probe-pam` con bearer, OAuth client-credentials, mTLS y
+referencias `env:`/`file:`/`secret:`, CA temporal, límites, redirects
+rechazados, JSON saneado y códigos de salida `0/1/2`; no contactan un tenant
+real. Ninguno prueba un proveedor real ni una instalación desplegada.
