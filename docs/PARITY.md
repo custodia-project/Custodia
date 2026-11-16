@@ -288,9 +288,9 @@ logs operativos ni tabla de etapas; esa telemetría sigue pendiente.
   positivo encola cuando pasa el intervalo desde el último intento. Un fallo
   se reintenta en el siguiente intervalo; todavía no hay backoff exponencial,
   política por fuente ni prioridad. El worker es único, no un pool.
-- Una colección por conexión y una corrida activa por conexión. Python usa
-  `task_key` y permite tareas hermanas de una fuente; esa separación queda para
-  el próximo tramo.
+- Una conexión de tenant agrupa varias colecciones (`group_id`) y cada una
+  mantiene su corrida activa, línea base y agenda. Python usa `task_key` por
+  tarea; la agenda sigue mostrando una fila por colección.
 - El alta y el probe ya existen por API para un administrador: catálogo de
   conectores con estado, conexión HTTPS con path opcional, referencias de
   credencial y auditoría. Un conector `planned` no declara contrato y no se

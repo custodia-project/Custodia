@@ -80,7 +80,7 @@ POST /api/ingestion/connections
 {
   "connector": "cyberark-pam-safes-v1",
   "base_url": "https://pvwa.empresa.example/PasswordVault",
-  "collection": "safes",
+  "collections": ["safes", "safe_members", "accounts"],
   "scope": "pam-safes-prod",
   "auth_mode": "oauth-client-credentials",
   "token_url": "https://pvwa.empresa.example/oauth2/platformtoken",
@@ -98,16 +98,24 @@ Reglas del alta:
   fragmento; se admite un prefijo de path (por ejemplo `/PasswordVault`).
 - La credencial es siempre una referencia `env:`, `file:` o `secret:`; el alta
   rechaza valores literales y nunca contacta el tenant.
-- El par conector/colección y el modo de auth deben existir en el descriptor.
+- Cada colección elegida debe existir en el descriptor; el alta deduplica y
+  crea una fila de fuente por colección bajo un mismo `group_id`.
+- Todas las colecciones comparten URL, credencial, CA y auth; el operador
+  conecta el tenant **una vez**.
 - El creador recibe lectura y `can_run` para esa conexión, y el alta queda en
   auditoría (`connection_register`).
 - La respuesta no repite la referencia de credencial: sólo indica si está
   configurada.
 
-`POST /api/ingestion/connections/{id}/probe` ejecuta el mismo plan validado del
-probe sobre los endpoints que esa colección necesita, devuelve un reporte
-saneado y audita `connection_probe`. Un probe con fallos se informa endpoint
-por endpoint; no publica observaciones ni encola una corrida.
+`POST /api/ingestion/connections/{id}/probe` acepta el `group_id` o una fila
+de colección. Con el grupo ejecuta el mismo plan validado sobre la unión de
+endpoints de todas sus colecciones, exige que compartan URL/auth/CA y devuelve
+un reporte saneado; audita `connection_probe`. Un probe con fallos se informa
+endpoint por endpoint; no publica observaciones ni encola una corrida.
+
+Cada colección conserva su propia corrida, línea base, agenda y permisos. El
+grupo es la unidad que ve el operador; la separación interna evita mezclar
+retiros de una colección con los de otra.
 
 
 ## Estados y reconciliación

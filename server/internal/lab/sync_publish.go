@@ -298,20 +298,40 @@ func (s *Store) loadSyncSource(ctx context.Context, connectionID string) (SyncSo
 	return scanSyncSource(s.DB.QueryRowContext(ctx, syncSourceSelect, connectionID))
 }
 
-const syncSourceSelect = `SELECT connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,
+const syncSourceColumns = `SELECT connection_id,coalesce(group_id,connection_id),connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,
  coalesce(auth_mode,'none'),coalesce(credential_ref,''),coalesce(token_url,''),coalesce(client_id_ref,''),coalesce(client_secret_ref,''),
  coalesce(scopes_json,'[]'),coalesce(ca_file,''),coalesce(client_cert_file,''),coalesce(client_key_file,''),created_by,created_at
-	FROM lab_sync_sources WHERE connection_id=?`
+	FROM lab_sync_sources`
+
+const syncSourceSelect = syncSourceColumns + ` WHERE connection_id=?`
 
 func loadSyncSourceTx(ctx context.Context, tx *sql.Tx, connectionID string) (SyncSource, error) {
 	return scanSyncSource(tx.QueryRowContext(ctx, syncSourceSelect, connectionID))
+}
+
+// loadGroupSources returns every collection row of one tenant group.
+func loadGroupSources(ctx context.Context, db *sql.DB, groupID string) ([]SyncSource, error) {
+	rows, err := db.QueryContext(ctx, syncSourceColumns+` WHERE group_id=? ORDER BY collection`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sources := []SyncSource{}
+	for rows.Next() {
+		source, err := scanSyncSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+	return sources, rows.Err()
 }
 
 func scanSyncSource(row rowScanner) (SyncSource, error) {
 	var source SyncSource
 	var enabled int
 	var scopes string
-	err := row.Scan(&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
+	err := row.Scan(&source.ConnectionID, &source.GroupID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
 		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval,
 		&source.AuthMode, &source.CredentialRef, &source.TokenURL, &source.ClientIDRef, &source.ClientSecretRef,
 		&scopes, &source.CAFile, &source.ClientCertFile, &source.ClientKeyFile, &source.CreatedBy, &source.CreatedAt)

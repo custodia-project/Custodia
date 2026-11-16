@@ -13,7 +13,7 @@ const cyberArk: ConnectorDescriptor = {
   category: 'PAM',
   status: 'available',
   auth_modes: ['bearer', 'oauth-client-credentials', 'mtls'],
-  collections: ['safes', 'safe_members'],
+  collections: ['safes', 'safe_members', 'accounts'],
   probe_endpoints: ['/API/Safes'],
   notes: 'Read-only PAM.',
 };
@@ -44,13 +44,30 @@ test('a bearer tenant builds a request without ever sending the credential value
   assert.deepEqual(draft.request, {
     connector: 'cyberark-pam-safes-v1',
     base_url: 'https://pvwa.acme.example/PasswordVault',
-    collection: 'safes',
+    collections: ['safes'],
     scope: 'pam-safes-prod',
     auth_mode: 'bearer',
     credential_ref: 'secret:pam-bearer',
     interval_minutes: 0,
   });
   assert.equal(JSON.stringify(draft.request).includes('super-secret'), false);
+});
+
+test('one tenant connection may collect several collections with one credential', () => {
+  const draft = buildConnectionRequest(form({ collections: ['safes', 'safe_members', 'accounts'] }), cyberArk);
+  assert.equal(draft.ok, true);
+  if (!draft.ok) return;
+  assert.deepEqual(draft.request.collections, ['safes', 'safe_members', 'accounts']);
+  assert.equal(draft.request.credential_ref, 'secret:pam-bearer');
+  assert.equal(draft.request.base_url, 'https://pvwa.acme.example/PasswordVault');
+});
+
+test('an empty or unknown collection selection is rejected', () => {
+  for (const collections of [[], ['safes', 'events']]) {
+    const draft = buildConnectionRequest(form({ collections }), cyberArk);
+    assert.equal(draft.ok, false);
+    if (!draft.ok) assert.equal(draft.errors.some((message) => message.includes('colección')), true);
+  }
 });
 
 test('oauth adds token endpoint, references and scopes', () => {
@@ -105,7 +122,7 @@ test('unsafe URLs, literal credentials and bad intervals are rejected', () => {
 
 test('a planned connector can never produce a request', () => {
   const planned: ConnectorDescriptor = { ...cyberArk, id: 'qradar', status: 'planned', collections: [], auth_modes: [] };
-  const draft = buildConnectionRequest(form({ connector: 'qradar', collection: '' }), planned);
+  const draft = buildConnectionRequest(form({ connector: 'qradar', collections: [] }), planned);
   assert.equal(draft.ok, false);
 });
 

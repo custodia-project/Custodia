@@ -7,6 +7,12 @@
 .connection-field input, .connection-field select { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font: inherit; min-height: 34px; padding: 6px 8px; width: 100%; }
 .connection-field input:focus-visible, .connection-field select:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 .connection-field small { color: var(--text-secondary); font-size: 10px; line-height: 1.35; }
+.connection-collections { border: 0; margin: 0; min-width: 0; padding: 0; }
+.connection-collections legend { color: var(--text-secondary); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; padding: 0; text-transform: uppercase; }
+.connection-checks { display: grid; gap: 4px 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.connection-check { align-items: center; color: var(--text-primary); display: flex; font-size: 11px; gap: 6px; }
+.connection-check input { accent-color: var(--accent-strong); height: 14px; margin: 0; width: 14px; }
+.connection-check-actions { display: flex; gap: 6px; margin-top: 4px; }
 .connection-note { color: var(--text-secondary); font-size: 11px; margin: 0; }
 .connection-errors { color: var(--danger); font-size: 11px; margin: 0; padding-left: 18px; }
 .connection-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }

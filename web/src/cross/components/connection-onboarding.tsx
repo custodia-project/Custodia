@@ -97,7 +97,7 @@ export function ConnectionOnboarding({ permissions, onUnauthorized }: { permissi
     setBusy(true);
     setError('');
     try {
-      setProbe(await probeConnection(created.connection_id));
+      setProbe(await probeConnection(created.group_id ?? created.connection_id));
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) { onUnauthorized?.(); return; }
       setError(caught instanceof Error ? caught.message : t('No se pudo probar el acceso'));
@@ -133,11 +133,27 @@ export function ConnectionOnboarding({ permissions, onUnauthorized }: { permissi
             <Field label={t('URL del tenant')} hint={t('HTTPS; se admite un prefijo de path como /PasswordVault.')}>
               <input aria-label={t('URL del tenant')} type="url" placeholder="https://pvwa.empresa.example/PasswordVault" value={form.baseUrl} onChange={(event) => update({ baseUrl: event.target.value })} />
             </Field>
-            <Field label={t('Colección')}>
-              <select aria-label={t('Colección')} value={form.collection} onChange={(event) => update({ collection: event.target.value })}>
-                {(descriptor?.collections ?? []).map((collection) => <option key={collection} value={collection}>{collection}</option>)}
-              </select>
-            </Field>
+            <fieldset className="connection-field connection-collections">
+              <legend>{t('Colecciones')}</legend>
+              <div className="connection-checks">
+                {(descriptor?.collections ?? []).map((collection) => {
+                  const checked = form.collections.includes(collection);
+                  return <label key={collection} className="connection-check">
+                    <input type="checkbox" checked={checked} onChange={(event) => update({
+                      collections: event.target.checked
+                        ? [...form.collections, collection]
+                        : form.collections.filter((item) => item !== collection),
+                    })} />
+                    <span>{collection}</span>
+                  </label>;
+                })}
+              </div>
+              <small>{t('Una conexión recolecta todas las colecciones elegidas con la misma URL y credencial.')}</small>
+              <div className="connection-check-actions">
+                <button type="button" className="button subtle" onClick={() => update({ collections: [...(descriptor?.collections ?? [])] })}>{t('Todas')}</button>
+                <button type="button" className="button subtle" onClick={() => update({ collections: [] })}>{t('Ninguna')}</button>
+              </div>
+            </fieldset>
             <Field label={t('Alcance')} hint={t('Identifica la línea base; un cambio de alcance no retira registros.')}>
               <input aria-label={t('Alcance')} value={form.scope} onChange={(event) => update({ scope: event.target.value })} placeholder="pam-safes-prod" />
             </Field>
@@ -188,7 +204,7 @@ export function ConnectionOnboarding({ permissions, onUnauthorized }: { permissi
         </form>}
 
     {created && <div className="connection-created">
-      <p role="status">{t('Conexión {id} registrada para {collection}.', { id: created.connection_id, collection: created.collection })}</p>
+      <p role="status">{t('Conexión {id} registrada para {collections}.', { id: created.group_id ?? created.connection_id, collections: (created.collections ?? [created.collection]).join(', ') })}</p>
       <div className="connection-actions">
         <button className="button subtle" type="button" onClick={() => void runProbe()} disabled={busy}><PlugZap size={14} /> {busy ? t('Probando…') : t('Probar acceso')}</button>
         <span className="connection-hint">{t('Sólo lectura; no publica observaciones ni encola una corrida.')}</span>

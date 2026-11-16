@@ -42,6 +42,7 @@ const (
 // administrator uses HTTPS and an auth plan validated by the probe package.
 type SyncSource struct {
 	ConnectionID    string   `json:"connection_id"`
+	GroupID         string   `json:"group_id"`
 	Connector       string   `json:"connector"`
 	BaseURL         string   `json:"base_url"`
 	Collection      string   `json:"collection"`

@@ -122,6 +122,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = migrateConnections(ctx, tx); err != nil {
 		return err
 	}
+	if err = migrateConnectionGroups(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

@@ -5,7 +5,7 @@ import type { ConnectorDescriptor } from '../types/ingestion';
 export type ConnectionForm = {
   connector: string;
   baseUrl: string;
-  collection: string;
+  collections: string[];
   scope: string;
   authMode: string;
   credentialRef: string;
@@ -22,7 +22,7 @@ export type ConnectionForm = {
 export type ConnectionRequest = {
   connector: string;
   base_url: string;
-  collection: string;
+  collections: string[];
   scope: string;
   auth_mode: string;
   credential_ref?: string;
@@ -42,7 +42,7 @@ export function emptyConnectionForm(descriptor?: ConnectorDescriptor): Connectio
   return {
     connector: descriptor?.id ?? '',
     baseUrl: '',
-    collection: descriptor?.collections[0] ?? '',
+    collections: descriptor?.collections.length ? [descriptor.collections[0]] : [],
     scope: '',
     authMode: descriptor?.auth_modes[0] ?? '',
     credentialRef: '',
@@ -91,8 +91,8 @@ export function buildConnectionRequest(form: ConnectionForm, descriptor: Connect
     if (base.username || base.password) errors.push('La URL no debe incluir credenciales.');
     if (base.search || base.hash) errors.push('La URL no debe incluir query ni fragmento.');
   }
-  if (!descriptor.collections.includes(form.collection)) {
-    errors.push('Elegí una colección implementada para esta herramienta.');
+  if (form.collections.length === 0 || form.collections.some((collection) => !descriptor.collections.includes(collection))) {
+    errors.push('Elegí al menos una colección implementada para esta herramienta.');
   }
   if (!form.scope.trim()) errors.push('El alcance es obligatorio.');
   if (!descriptor.auth_modes.includes(form.authMode)) {
@@ -128,7 +128,7 @@ export function buildConnectionRequest(form: ConnectionForm, descriptor: Connect
   const request: ConnectionRequest = {
     connector: descriptor.id,
     base_url: form.baseUrl.trim(),
-    collection: form.collection,
+    collections: [...form.collections],
     scope: form.scope.trim(),
     auth_mode: form.authMode,
     interval_minutes: interval,

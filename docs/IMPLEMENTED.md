@@ -6,6 +6,28 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Una conexión de tenant, varias colecciones — 16/11
+
+La migración aditiva 8 agrega `group_id` a `lab_sync_sources` y lo rellena con
+el `connection_id` existente, sin tocar las migraciones 1–7. El alta acepta
+`collections[]`: crea una fila de fuente por colección bajo el mismo grupo, con
+la misma URL, credencial, CA y modo de auth, y concede lectura/`can_run` al
+creador en cada una. Un tenant CyberArk se conecta una sola vez para Safes,
+miembros, cuentas, plataformas y catálogos PSM, en lugar de repetir el alta.
+
+El probe de grupo une los endpoints de sus colecciones, exige que todas
+compartan configuración y audita una sola vez. Cada colección mantiene su
+corrida, línea base, agenda, retiros y permisos: una corrida parcial de una
+colección no afecta a las demás. La UI muestra las colecciones como
+checkboxes, con “Todas” y “Ninguna”, y el aviso usa el `group_id`.
+
+Verificación: `TestTenantConnectionCollectsSeveralCollections` registra Safes y
+cuentas, comprueba dos filas con el mismo `group_id`, un probe de grupo con
+ambos endpoints y una corrida completada por colección con sus registros.
+`verify:go:gateway` repite el recorrido desde la UI con un tenant TLS: elige
+CyberArk, marca `accounts`, conecta, prueba los dos endpoints y recolecta dos
+Safes y dos cuentas.
+
 ## Alta de conexiones por herramienta y probe desde la instalación vacía — 16/11
 
 Custodia ya no depende de `add-http-lab` para incorporar una fuente. El registro

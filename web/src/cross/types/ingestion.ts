@@ -82,6 +82,9 @@ export type ConnectorDescriptor = {
 
 export type TenantConnection = {
   connection_id: string;
+  group_id?: string;
+  collections?: string[];
+  connections?: TenantConnection[];
   connector: string;
   base_url: string;
   collection: string;

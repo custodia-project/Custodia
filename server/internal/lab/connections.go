@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,15 +45,40 @@ INSERT INTO lab_schema_migrations VALUES(7);`)
 	return err
 }
 
+// migrateConnectionGroups is migration 8. It adds the tenant group shared by
+// the collection rows of one connection. Existing rows become their own group,
+// so nothing changes for a single-collection connection.
+func migrateConnectionGroups(ctx context.Context, tx *sql.Tx) error {
+	var version int
+	if err := tx.QueryRowContext(ctx, "SELECT max(version) FROM lab_schema_migrations").Scan(&version); err != nil {
+		return err
+	}
+	if version >= 8 {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `ALTER TABLE lab_sync_sources ADD COLUMN group_id TEXT NOT NULL DEFAULT '';
+UPDATE lab_sync_sources SET group_id = connection_id WHERE group_id = '';
+CREATE INDEX IF NOT EXISTS lab_sync_sources_group ON lab_sync_sources(group_id);
+INSERT INTO lab_schema_migrations VALUES(8);`)
+	return err
+}
+
 // ProbePlan builds the same validated, authenticated plan used by the probe
 // CLI. Credential values are resolved only when the client is prepared.
 func (source SyncSource) ProbePlan() (probe.Plan, error) {
+	return source.probePlan(nil)
+}
+
+func (source SyncSource) probePlan(endpoints []string) (probe.Plan, error) {
 	descriptor, found := connectors.Get(source.Connector)
 	if !found {
 		return probe.Plan{}, errors.New("unsupported connector")
 	}
 	if !connectors.Connectable(descriptor) {
 		return probe.Plan{}, errors.New("connector is planned, not connectable")
+	}
+	if len(endpoints) == 0 {
+		endpoints = connectors.ProbeEndpointsFor(descriptor, source.Collection)
 	}
 	return probe.NewPlan(probe.Config{
 		BaseURL:         source.BaseURL,
@@ -65,7 +91,7 @@ func (source SyncSource) ProbePlan() (probe.Plan, error) {
 		ClientCertFile:  source.ClientCertFile,
 		ClientKeyFile:   source.ClientKeyFile,
 		CAFile:          source.CAFile,
-		Endpoints:       connectors.ProbeEndpointsFor(descriptor, source.Collection),
+		Endpoints:       endpoints,
 		Authorized:      true,
 		Timeout:         0,
 	})
@@ -105,26 +131,37 @@ func validateConnectionConfiguration(source SyncSource, grants []string) error {
 	return nil
 }
 
+// ConnectionRegistration is one tenant connection with one or more
+// collection rows. The group is what the operator sees; each collection keeps
+// its own durable run, baseline and grants.
+type ConnectionRegistration struct {
+	GroupID     string       `json:"group_id"`
+	Collections []string     `json:"collections"`
+	Connections []SyncSource `json:"connections"`
+}
+
 // RegisterConnection is the onboarding path: an administrator names a
-// connector, a tenant URL and credential references, and Custodia creates the
-// connection without contacting the tenant. The creator receives read and run
-// grants for that connection.
-func (s *Store) RegisterConnection(ctx context.Context, actor string, principal Principal, source SyncSource, now time.Time) (SyncSource, error) {
+// connector, a tenant URL, credential references and one or more collections.
+// Custodia creates one source per collection under a shared group without
+// contacting the tenant. The creator receives read and run grants for every
+// collection.
+func (s *Store) RegisterConnection(ctx context.Context, actor string, principal Principal, source SyncSource, collections []string, now time.Time) (ConnectionRegistration, error) {
 	if !s.IsAdministrator(ctx, principal) {
-		return SyncSource{}, ErrDenied
+		return ConnectionRegistration{}, ErrDenied
 	}
-	if source.ConnectionID == "" {
-		source.ConnectionID = generatedConnectionID(source.Connector)
+	descriptor, found := connectors.Get(source.Connector)
+	if !found {
+		return ConnectionRegistration{}, errors.New("unsupported connector")
+	}
+	if !connectors.Connectable(descriptor) {
+		return ConnectionRegistration{}, fmt.Errorf("connector %s is planned, not connectable", descriptor.ID)
+	}
+	collections = normalizeCollections(collections, source.Collection, descriptor)
+	if len(collections) == 0 {
+		return ConnectionRegistration{}, errors.New("choose at least one implemented collection")
 	}
 	if source.Generation == "" {
 		source.Generation = source.Connector
-	}
-	if source.Collection == "" {
-		descriptor, found := connectors.Get(source.Connector)
-		if !found || len(descriptor.Collections) == 0 {
-			return SyncSource{}, errors.New("connector has no implemented collection")
-		}
-		source.Collection = descriptor.Collections[0]
 	}
 	if source.PageSize == 0 {
 		source.PageSize = syncDefaultPage
@@ -135,80 +172,128 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 	if source.MaxRecords == 0 {
 		source.MaxRecords = syncDefaultRecords
 	}
+	longest := 0
+	for _, collection := range collections {
+		if len(collectionSlug(collection)) > longest {
+			longest = len(collectionSlug(collection))
+		}
+	}
+	groupID := generatedConnectionIDFor(source.Connector, longest+1)
 	grants := []string{principal.Subject}
-	if err := validateConnectionConfiguration(source, grants); err != nil {
-		return SyncSource{}, err
+	children := make([]SyncSource, 0, len(collections))
+	for _, collection := range collections {
+		child := source
+		child.GroupID = groupID
+		child.Collection = collection
+		if len(collections) == 1 {
+			child.ConnectionID = groupID
+		} else {
+			child.ConnectionID = groupID + "-" + collectionSlug(collection)
+		}
+		if !connectionPattern.MatchString(child.ConnectionID) || len(child.ConnectionID) > 64 {
+			return ConnectionRegistration{}, errors.New("generated collection connection ID is too long")
+		}
+		if err := validateConnectionConfiguration(child, grants); err != nil {
+			return ConnectionRegistration{}, err
+		}
+		children = append(children, child)
 	}
 	source.CreatedBy = actor
 	source.CreatedAt = now.UTC().Format(time.RFC3339)
-	source.Enabled = true
 	scopes, err := json.Marshal(source.Scopes)
 	if err != nil {
-		return SyncSource{}, err
+		return ConnectionRegistration{}, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return SyncSource{}, err
+		return ConnectionRegistration{}, err
 	}
 	defer tx.Rollback()
-	// kind stays "netskope" for external sources: it is the legacy label the
-	// read models already understand. The connector ID is the authoritative
-	// tool identity and is exposed by /api/connections.
-	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_connections(id,kind) VALUES(?,?)", source.ConnectionID, "netskope"); err != nil {
-		return SyncSource{}, fmt.Errorf("connection ID already exists or is invalid")
+	for _, child := range children {
+		child.CreatedBy = source.CreatedBy
+		child.CreatedAt = source.CreatedAt
+		// kind stays "netskope" for external sources: it is the legacy label
+		// the read models already understand. The connector ID is the
+		// authoritative tool identity.
+		if _, err = tx.ExecContext(ctx, "INSERT INTO lab_connections(id,kind) VALUES(?,?)", child.ConnectionID, "netskope"); err != nil {
+			return ConnectionRegistration{}, fmt.Errorf("connection ID already exists or is invalid")
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,group_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,auth_mode,credential_ref,token_url,client_id_ref,client_secret_ref,scopes_json,ca_file,client_cert_file,client_key_file,created_by,created_at)
+			VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			child.ConnectionID, child.GroupID, child.Connector, child.BaseURL, child.Collection, child.Scope, child.Generation,
+			child.PageSize, child.MaxPages, child.MaxRecords, child.Interval,
+			normalizedAuthMode(child.AuthMode), child.CredentialRef, child.TokenURL, child.ClientIDRef, child.ClientSecretRef,
+			string(scopes), child.CAFile, child.ClientCertFile, child.ClientKeyFile, child.CreatedBy, child.CreatedAt); err != nil {
+			return ConnectionRegistration{}, err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO lab_grants(principal_id,connection_id) VALUES(?,?)", principal.ID, child.ConnectionID); err != nil {
+			return ConnectionRegistration{}, err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO lab_sync_grants(principal_id,connection_id,can_run) VALUES(?,?,1)", principal.ID, child.ConnectionID); err != nil {
+			return ConnectionRegistration{}, err
+		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,auth_mode,credential_ref,token_url,client_id_ref,client_secret_ref,scopes_json,ca_file,client_cert_file,client_key_file,created_by,created_at)
-		VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		source.ConnectionID, source.Connector, source.BaseURL, source.Collection, source.Scope, source.Generation,
-		source.PageSize, source.MaxPages, source.MaxRecords, source.Interval,
-		normalizedAuthMode(source.AuthMode), source.CredentialRef, source.TokenURL, source.ClientIDRef, source.ClientSecretRef,
-		string(scopes), source.CAFile, source.ClientCertFile, source.ClientKeyFile, source.CreatedBy, source.CreatedAt); err != nil {
-		return SyncSource{}, err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_grants(principal_id,connection_id) VALUES(?,?)", principal.ID, source.ConnectionID); err != nil {
-		return SyncSource{}, err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_sync_grants(principal_id,connection_id,can_run) VALUES(?,?,1)", principal.ID, source.ConnectionID); err != nil {
-		return SyncSource{}, err
+	childIDs := make([]string, 0, len(children))
+	for _, child := range children {
+		childIDs = append(childIDs, child.ConnectionID)
 	}
 	after, _ := json.Marshal(map[string]any{
-		"connection_id": source.ConnectionID, "connector": source.Connector, "base_url": source.BaseURL,
-		"collection": source.Collection, "scope": source.Scope, "generation": source.Generation,
-		"auth_mode": normalizedAuthMode(source.AuthMode), "credential_configured": source.CredentialRef != "",
-		"ca_configured": source.CAFile != "", "mtls_configured": source.ClientCertFile != "",
+		"group_id": groupID, "connection_ids": childIDs, "connector": source.Connector,
+		"base_url": source.BaseURL, "collections": collections, "scope": source.Scope,
+		"generation": source.Generation, "auth_mode": normalizedAuthMode(source.AuthMode),
+		"credential_configured": source.CredentialRef != "", "ca_configured": source.CAFile != "",
+		"mtls_configured": source.ClientCertFile != "",
 	})
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_audit(actor,action,before_json,after_json,at) VALUES(?,'connection_register','{}',?,?)", actor, after, now.UTC().Format(time.RFC3339)); err != nil {
-		return SyncSource{}, err
+		return ConnectionRegistration{}, err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_audit(actor,action,before_json,after_json,at) VALUES(?,'sync_grant','{}',?,?)", actor, after, now.UTC().Format(time.RFC3339)); err != nil {
-		return SyncSource{}, err
+		return ConnectionRegistration{}, err
 	}
 	if err = tx.Commit(); err != nil {
-		return SyncSource{}, err
+		return ConnectionRegistration{}, err
 	}
-	return source, nil
+	return ConnectionRegistration{GroupID: groupID, Collections: collections, Connections: children}, nil
 }
 
-// ProbeConnection runs the read-only probe for one registered connection and
-// records only a sanitized summary. It never persists observations and never
-// queues a sync run.
+// ProbeConnection runs the read-only probe for one connection group or one
+// collection row and records only a sanitized summary. It never persists
+// observations and never queues a sync run.
 func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connectionID string, now time.Time) (probe.Report, error) {
 	if !s.IsAdministrator(ctx, principal) {
 		return probe.Report{}, ErrDenied
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	sources, err := loadGroupSources(ctx, s.DB, connectionID)
 	if err != nil {
 		return probe.Report{}, err
 	}
-	defer tx.Rollback()
-	source, err := loadSyncSourceTx(ctx, tx, connectionID)
-	if err != nil {
-		return probe.Report{}, ErrSyncNotFound
+	if len(sources) == 0 {
+		child, err := s.loadSyncSource(ctx, connectionID)
+		if err != nil {
+			return probe.Report{}, ErrSyncNotFound
+		}
+		sources = []SyncSource{child}
 	}
-	if err = tx.Commit(); err != nil {
-		return probe.Report{}, err
+	first := sources[0]
+	endpoints := []string{}
+	seen := map[string]bool{}
+	for _, source := range sources {
+		if !sameConnectionConfig(first, source) {
+			return probe.Report{}, errors.New("collection rows of this group have different connection settings")
+		}
+		descriptor, found := connectors.Get(source.Connector)
+		if !found {
+			return probe.Report{}, errors.New("unsupported connector")
+		}
+		for _, endpoint := range connectors.ProbeEndpointsFor(descriptor, source.Collection) {
+			if seen[endpoint] {
+				continue
+			}
+			seen[endpoint] = true
+			endpoints = append(endpoints, endpoint)
+		}
 	}
-	plan, err := source.ProbePlan()
+	plan, err := first.probePlan(endpoints)
 	if err != nil {
 		return probe.Report{}, err
 	}
@@ -217,7 +302,7 @@ func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connec
 		return probe.Report{}, err
 	}
 	after, _ := json.Marshal(map[string]any{
-		"connection_id": connectionID, "connector": source.Connector,
+		"connection_id": connectionID, "group_id": first.GroupID, "connector": first.Connector,
 		"auth_mode": string(plan.AuthMode), "failed_endpoints": report.Failed(),
 		"endpoints": report.Endpoints,
 	})
@@ -225,6 +310,40 @@ func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connec
 		return probe.Report{}, err
 	}
 	return report, nil
+}
+
+func sameConnectionConfig(left, right SyncSource) bool {
+	return left.Connector == right.Connector && left.BaseURL == right.BaseURL &&
+		normalizedAuthMode(left.AuthMode) == normalizedAuthMode(right.AuthMode) &&
+		left.CredentialRef == right.CredentialRef && left.TokenURL == right.TokenURL &&
+		left.ClientIDRef == right.ClientIDRef && left.ClientSecretRef == right.ClientSecretRef &&
+		left.CAFile == right.CAFile && left.ClientCertFile == right.ClientCertFile &&
+		left.ClientKeyFile == right.ClientKeyFile && slices.Equal(left.Scopes, right.Scopes)
+}
+
+func normalizeCollections(collections []string, single string, descriptor connectors.Descriptor) []string {
+	candidates := collections
+	if len(candidates) == 0 && single != "" {
+		candidates = []string{single}
+	}
+	if len(candidates) == 0 && len(descriptor.Collections) > 0 {
+		candidates = []string{descriptor.Collections[0]}
+	}
+	seen := map[string]bool{}
+	result := make([]string, 0, len(candidates))
+	for _, collection := range candidates {
+		collection = strings.TrimSpace(collection)
+		if collection == "" || seen[collection] || !connectors.SupportsCollection(descriptor, collection) {
+			continue
+		}
+		seen[collection] = true
+		result = append(result, collection)
+	}
+	return result
+}
+
+func collectionSlug(collection string) string {
+	return strings.ReplaceAll(strings.ToLower(collection), "_", "-")
 }
 
 func normalizedAuthMode(mode string) string {
@@ -240,7 +359,7 @@ func normalizedAuthMode(mode string) string {
 // they are configured.
 func syncSourceJSON(source SyncSource) map[string]any {
 	return map[string]any{
-		"connection_id": source.ConnectionID, "connector": source.Connector,
+		"connection_id": source.ConnectionID, "group_id": source.GroupID, "connector": source.Connector,
 		"base_url": source.BaseURL, "collection": source.Collection,
 		"scope": source.Scope, "generation": source.Generation,
 		"auth_mode":             normalizedAuthMode(source.AuthMode),
@@ -270,14 +389,22 @@ func safeConfigurationError(err error) string {
 }
 
 func generatedConnectionID(connector string) string {
+	return generatedConnectionIDFor(connector, 0)
+}
+
+func generatedConnectionIDFor(connector string, reserve int) string {
 	base := strings.ToLower(connector)
 	base = strings.NewReplacer("_", "-", ".", "-").Replace(base)
 	for strings.Contains(base, "--") {
 		base = strings.ReplaceAll(base, "--", "-")
 	}
 	base = strings.Trim(base, "-")
-	if len(base) > 40 {
-		base = strings.Trim(base[:40], "-")
+	limit := 46 - reserve
+	if limit < 12 {
+		limit = 12
+	}
+	if len(base) > limit {
+		base = strings.Trim(base[:limit], "-")
 	}
 	if !generatedConnection.MatchString(base) {
 		base = "connection"

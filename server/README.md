@@ -277,7 +277,9 @@ POST /api/ingestion/connections/{id}/probe
 ```
 
 `connectors` publica el registro estático con estado, auth, colecciones y
-endpoints. La pestaña Conexiones de la UI usa estos tres contratos y sólo se
+endpoints. `collections[]` crea una fila por colección bajo un mismo
+`group_id`, con la misma URL y credencial; el probe acepta el grupo y cubre la
+unión de endpoints. La pestaña Conexiones de la UI usa estos tres contratos y sólo se
 muestra al administrador; el backend anuncia `audit:read` para alcanzar
 Actividad con identidad real. Un conector `planned` no declara contrato y el alta lo rechaza. El
 alta exige administrador, HTTPS con path opcional, un par conector/colección

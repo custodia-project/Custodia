@@ -46,6 +46,7 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			Connector       string   `json:"connector"`
 			BaseURL         string   `json:"base_url"`
 			Collection      string   `json:"collection"`
+			Collections     []string `json:"collections"`
 			Scope           string   `json:"scope"`
 			Generation      string   `json:"generation"`
 			AuthMode        string   `json:"auth_mode"`
@@ -68,7 +69,7 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			fail(400, "Configuración de conexión inválida.")
 			return true
 		}
-		source, err := s.RegisterConnection(r.Context(), principal.Actor(), principal, SyncSource{
+		registration, err := s.RegisterConnection(r.Context(), principal.Actor(), principal, SyncSource{
 			Connector: input.Connector, BaseURL: input.BaseURL, Collection: input.Collection,
 			Scope: input.Scope, Generation: input.Generation, AuthMode: input.AuthMode,
 			CredentialRef: input.CredentialRef, TokenURL: input.TokenURL,
@@ -77,7 +78,7 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			ClientCertFile: input.ClientCertFile, ClientKeyFile: input.ClientKeyFile,
 			PageSize: input.PageSize, MaxPages: input.MaxPages, MaxRecords: input.MaxRecords,
 			Interval: input.Interval,
-		}, current)
+		}, input.Collections, current)
 		if err != nil {
 			if errors.Is(err, ErrDenied) {
 				fail(403, "Sólo un administrador puede conectar un tenant.")
@@ -86,7 +87,16 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			}
 			return true
 		}
-		send(201, syncSourceJSON(source))
+		first := registration.Connections[0]
+		response := syncSourceJSON(first)
+		response["group_id"] = registration.GroupID
+		response["collections"] = registration.Collections
+		connections := make([]map[string]any, 0, len(registration.Connections))
+		for _, child := range registration.Connections {
+			connections = append(connections, syncSourceJSON(child))
+		}
+		response["connections"] = connections
+		send(201, response)
 		return true
 	case strings.HasPrefix(path, "connections/") && strings.HasSuffix(path, "/probe"):
 		if r.Method != "POST" {
