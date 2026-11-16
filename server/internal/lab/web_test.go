@@ -61,7 +61,7 @@ func TestPreferencesAtomicAuditAndAuthorization(t *testing.T) {
 	if request("bad", `{"recent_workspaces":["person"]}`) != 401 {
 		t.Fatal("unauthorized mutation")
 	}
-	if request("lab-key", `{"recent_workspaces":["safes"]}`) != 403 {
+	if request("lab-key", `{"recent_workspaces":["not-a-workspace"]}`) != 403 {
 		t.Fatal("unsupported workspace accepted")
 	}
 	if request("lab-key", `{"recent_workspaces":["person"]}`) != 200 {

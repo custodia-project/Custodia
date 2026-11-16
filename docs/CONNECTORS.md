@@ -12,10 +12,12 @@ contra servidores HTTP locales sintéticos: el contrato normalizado
 (colecciones `safes`, `safe_members`, `accounts`, `platforms`, `psm_servers`,
 `psm_connectors` y `platform_psm_links`). El alta de conexiones y el probe por
 API ya existen para un administrador; las herramientas planificadas no tienen
-contrato y no se pueden conectar. Ningún adaptador acredita un tenant real.
-Objetivo: agregar una herramienta sin modificar el núcleo ni obligar al
-operador a conocer sus endpoints. No es posible generalizar los significados
-de todas las APIs con un formulario URL + token.
+contrato y no se pueden conectar. El inventario calcula, al leer sobre datos
+publicados, las métricas que cada conector declara en el binario. Ningún
+adaptador acredita un tenant real. Objetivo: agregar una herramienta sin
+modificar el núcleo ni obligar al operador a conocer sus endpoints. No es
+posible generalizar los significados de todas las APIs con un formulario
+URL + token.
 
 ## Tres identidades distintas
 
@@ -159,6 +161,107 @@ Pasos para pasar un candidato a implementado: contrato (endpoints,
 allowlist, paginación, autenticación de lectura), fixture sintético, adaptador
 con el contrato de aceptación común, métricas declaradas y aceptación contra
 la instancia propia. Un conector por vez; no abrir varios a medias.
+
+## Métricas por conector (decisión del dueño, 16/11)
+
+Cada conector declara sus métricas en el binario, junto a sus colecciones.
+El administrador no las define en el MVP; las métricas personalizadas
+quedan para después.
+
+Una métrica declara: ID versionado, nombre y explicación legibles,
+colección de origen, cálculo (conteo, conteo con filtro sobre un campo de la
+allowlist, proporción con numerador y denominador, antigüedad respecto de un
+umbral fijo) y unidad. Cambiar el cálculo crea una versión nueva; no se
+reinterpreta un valor histórico. El binario trae el catálogo declarado en
+`server/internal/metrics`; la validación de pruebas exige que la colección
+pertenezca al descriptor del conector y que cada campo usado exista en la
+allowlist normalizada de `server/internal/inventory`. Una métrica no puede
+leer el payload crudo del proveedor ni un campo fuera de esa allowlist.
+
+Cálculos disponibles:
+
+| Cálculo | Semántica |
+|---|---|
+| `count` | Registros activos de la colección publicada. |
+| `count_where` | Registros activos cuyo campo allowlisted es igual a uno de los valores declarados. Un registro sin el campo no cuenta. |
+| `ratio` | Porcentaje del numerador (`where`) sobre el denominador (`denominator_where`, o todos los registros). Se redondea a un decimal. |
+| `age_over` | Registros cuyo campo RFC3339 es anterior al umbral fijo de días, medido desde la fecha de publicación. Los registros sin fecha usable se informan como omitidos. |
+| `count_without` | Registros de la colección de origen que ningún registro de una colección hermana de la misma conexión referencia por el campo declarado. |
+
+Reglas de cálculo y presentación:
+
+- Se calcula al leer sobre la última publicación de la colección en esa
+  conexión; no hay tablas de métricas ni valores materializados. La
+  publicación es la última corrida `completed` o `partial`, y sólo se leen
+  las observaciones activas de su mismo alcance y generación: un cambio de
+  alcance no mezcla la línea base anterior.
+- Cada valor muestra la fecha de los datos (la publicación más antigua entre
+  sus fuentes) y el estado de la corrida de cada fuente.
+- Sin colección configurada o sin corrida que haya publicado datos, la métrica
+  es «no disponible», nunca cero. Una corrida parcial conserva el valor y lo
+  marca como parcial; una proporción o un `count_without` cuyo denominador o
+  referencia son parciales no se calculan. Una corrida fallida no reemplaza
+  la última publicación.
+- Cero sólo es un valor cuando una publicación confirma que no hay registros
+  que cumplan el cálculo.
+- Cada valor permite abrir exactamente los registros que lo componen, con los
+  mismos permisos de lectura de la conexión. Un usuario sin lectura no ve la
+  conexión; una colección no legible se informa igual que una no configurada,
+  sin revelar su existencia. Los umbrales son fijos en la versión de la
+  métrica y se muestran en su explicación.
+- El inventario por herramienta muestra conexión, colecciones, última
+  corrida, completitud y sus métricas. No hay métricas combinadas entre
+  herramientas en el MVP.
+
+### Métricas declaradas de CyberArk PAM
+
+`cyberark-pam-safes-v1` declara estas métricas sobre sus colecciones ya
+implementadas. Los nombres de campo son los atributos normalizados publicados,
+no los nombres JSON del proveedor.
+
+| ID | Métrica | Colección | Cálculo | Unidad |
+|---|---|---|---|---|
+| `cyberark-pam.safes.total.v1` | Safes totales | `safes` | `count` | Safes |
+| `cyberark-pam.safes.without_members.v1` | Safes sin miembros | `safes` ↔ `safe_members` | `count_without` de `safes` cuyo número no aparece como `safe_number` de ningún miembro | Safes |
+| `cyberark-pam.accounts.total.v1` | Cuentas totales | `accounts` | `count` | cuentas |
+| `cyberark-pam.accounts.auto_management_disabled.v1` | Cuentas con gestión automática deshabilitada | `accounts` | `count_where automatic_management_enabled=false` | cuentas |
+| `cyberark-pam.accounts.auto_management_disabled_ratio.v1` | Proporción de cuentas sin gestión automática | `accounts` | `ratio` de `false` sobre las cuentas que informan `true` o `false` | porcentaje |
+| `cyberark-pam.accounts.last_change_failed.v1` | Cuentas con último cambio fallido | `accounts` | `count_where management_status=failure` | cuentas |
+| `cyberark-pam.platforms.inactive.v1` | Plataformas inactivas | `platforms` | `count_where active=false` | plataformas |
+| `cyberark-pam.platforms.psm_unresolved.v1` | Plataformas con PSM sin resolver | `platform_psm_links` | `count_where resolution∈{missing,ambiguous}` | plataformas |
+
+La última métrica usa el cruce ya publicado `platform_psm_links`; no infiere
+la resolución al leer ni cuenta una plataforma sin referencia PSM. «Safes sin
+miembros» exige las dos colecciones en la misma conexión y no se calcula si
+`safe_members` es parcial. La proporción sólo usa el subconjunto que informa
+la bandera; por eso su denominador puede ser menor que «Cuentas totales».
+
+### API de inventario
+
+Las dos rutas son de lectura, se sirven desde la misma sesión autenticada y
+filtran por las concesiones de lectura antes de calcular:
+
+- `GET /api/inventory/tools` devuelve las conexiones visibles con su
+  conector, nombre, vendedor, categoría, `completeness`
+  (`complete`, `partial`, `incomplete`, `unpublished`), última corrida,
+  colecciones (estado de publicación, cantidad de registros y fechas) y
+  métricas. Cada métrica incluye `status` (`available`, `partial`,
+  `unavailable`), `value` (`null` cuando no hay valor), `partial`,
+  `numerator`/`denominator` para proporciones, `reason` estable
+  (`collection_unavailable`, `no_publication`, `partial_denominator`,
+  `partial_reference`, `empty_denominator`), `data_as_of` y `sources` con la
+  corrida de cada colección.
+- `GET /api/inventory/metrics/{metric_id}/records?connection={id}&limit=N`
+  devuelve la métrica recalculada y los registros que la componen. `connection`
+  es el identificador de la herramienta (el grupo de colecciones que muestra
+  el inventario), no la fila interna de una colección. `total` es la cantidad
+  completa contada y `records` se corta en `limit` (1–1000; por defecto 200)
+  con `truncated=true`. Una conexión no visible y una inexistente responden
+  igual (404), para no revelar que existe.
+
+Las rutas no aceptan escrituras (405) y no agregan tablas: el cálculo usa las
+observaciones y corridas ya publicadas. El detalle nunca devuelve secretos,
+payloads ni campos fuera de la allowlist.
 
 
 ## Estados y reconciliación

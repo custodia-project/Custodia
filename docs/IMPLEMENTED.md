@@ -6,6 +6,70 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Integración de login local e inventario — 16/11
+
+Las dos entregas conviven en el mismo árbol. La allowlist de preferencias de
+workspace en Go dejó de aceptar sólo `person`: valida los IDs del catálogo de
+la UI, acepta `inventory` y rechaza IDs desconocidos sin reflejarlos; la
+pantalla de Inventario ya guarda accesos rápidos. Se agregó
+`web/tests/e2e/cross/inventory.spec.ts` (mock, navegador): métrica no
+disponible distinta de cero, cero confirmado y drill-down con los registros
+exactos. El command center desambigua el «Inventario» de Netskope de
+«Inventario» de herramientas por grupo, sin cambiar la intención de la
+prueba.
+
+## Inventario de herramientas y métricas declaradas por conector — 16/11
+
+`PROD-METRIC-001`: el binario declara las métricas junto al catálogo de
+conectores y las calcula al leer sobre los datos ya publicados, sin tablas
+nuevas. `server/internal/metrics` define el modelo (ID versionado, nombre,
+explicación, colección, cálculo y unidad) con cinco cálculos: conteo, conteo
+con filtro, proporción, antigüedad con umbral fijo y conteo sin referencia en
+una colección hermana. La validación de pruebas exige que cada colección
+pertenezca al descriptor del conector y que cada campo usado exista en la
+allowlist normalizada de `server/internal/inventory`; un conector planificado
+no puede declarar métricas.
+
+CyberArk PAM declara ocho métricas: Safes totales, Safes sin miembros, cuentas
+totales, cuentas con gestión automática deshabilitada, su proporción, cuentas
+con último cambio fallido, plataformas inactivas y vínculos
+plataforma→PSM `missing`/`ambiguous`. «Safes sin miembros» usa el cruce ya
+publicado entre `safes` y `safe_members`; la resolución PSM sale de
+`platform_psm_links`, no se infiere al leer. Cada valor se calcula sobre la
+última corrida `completed` o `partial` de la colección, restringido a su
+alcance y generación: un cambio de alcance no suma registros de la línea base
+anterior.
+
+Reglas verificadas: una colección no configurada o sin publicación devuelve
+`unavailable` con valor nulo, nunca cero; un cero confirmado es un valor real;
+una corrida parcial conserva el conteo y lo marca `partial`; una proporción o
+un `count_without` con denominador/referencia parcial no se calculan; una
+corrida fallida no reemplaza la fecha ni los datos de la última publicación.
+La API `GET /api/inventory/tools` y
+`GET /api/inventory/metrics/{metric_id}/records?connection=...&limit=N` filtra
+por concesiones antes de calcular, no distingue una conexión oculta de una
+inexistente (404) y el detalle devuelve exactamente los registros contados,
+con `total` completo y `truncated` cuando aplica.
+
+La pantalla Inventario usa el sistema visual existente: tarjeta por conexión,
+colecciones con estado y fecha, completitud, métricas con valor/nombre/
+explicación/fecha y detalle de registros. La navegación la agrega al área
+Conexiones y a Command-K; también queda enlazada desde Primeros pasos. Respeta
+los permisos porque sólo recibe del backend las conexiones legibles.
+
+Evidencia: `TestDeclaredMetricsAreValid`,
+`TestValidateRejectsUndeclaredFieldsAndUnversionedIDs`,
+`TestEvaluateNeverInventsZero`, `TestEvaluateKinds`,
+`TestInventoryMetricsOverPAMFixture`, `TestInventoryMetricsUseTheLastPublicationScope`,
+`TestInventoryReportsAnUnfinishedLastRun`, `TestInventoryFirstPartialPublicationIsMarked`,
+`TestInventoryConfirmedZeroIsARealZero` y
+`TestInventoryHidesConnectionsWithoutReadGrant`, con el fixture PAM sintético.
+`go vet ./...` y `go test -race ./...` pasan. En web pasan `typecheck`, `lint`,
+`verify:styles`, `test:unit` (incluye ocho pruebas nuevas de presentación) y el
+mock de la demo queda pendiente de integrar. No hay aceptación contra un tenant
+CyberArk real, no se declaran métricas para otros conectores y la demo estática
+todavía no sirve estas rutas.
+
 ## Login local, sesiones y administración mínima — 16/11
 
 [ACCESS.md](ACCESS.md#modo-local-contrato) fija el contrato antes del código:

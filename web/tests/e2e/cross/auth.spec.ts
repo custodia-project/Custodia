@@ -816,7 +816,7 @@ test('command center only exposes authorized tools and actions', async ({ page }
   const netskopeDialog = page.getByRole('dialog', { name: 'Command center' });
   await expect(netskopeDialog.getByRole('group', { name: 'Netskope', exact: true }).getByRole('option', { name: /^Métricas/ })).toBeVisible();
   await expect(netskopeDialog.getByRole('option', { name: /^Equipos\b/ })).toBeVisible();
-  await expect(netskopeDialog.getByRole('option', { name: /^Inventario\b/ })).toBeVisible();
+  await expect(netskopeDialog.getByRole('group', { name: 'Netskope', exact: true }).getByRole('option', { name: /^Inventario\b/ })).toBeVisible();
 });
 
 test('notifications never claim there are no syncs while showing activity', async ({ page }) => {

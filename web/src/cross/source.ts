@@ -1,4 +1,4 @@
-import { BookOpen, History, UserRound, Users } from 'lucide-react';
+import { BookOpen, Boxes, History, UserRound, Users } from 'lucide-react';
 import type { FrontendRegistration, RuntimeRegistration } from '../source-contract.ts';
 import { t } from './i18n/index.ts';
 
@@ -8,6 +8,17 @@ const runtime: RuntimeRegistration = { id: 'admin', load: () => import('./router
 export const registration = {
   id: 'cross',
   workspaces: [
+    {
+      id: 'inventory', path: '/inventory', domain: 'cross',
+      label: t('Inventario'), detail: t('Herramientas integradas y sus métricas'), icon: Boxes,
+      description: t('Cada herramienta conectada muestra sus colecciones, la última corrida y las métricas declaradas por su conector, con la fecha de los datos y el detalle de los registros que las componen.'),
+      introHelp: { label: t('Inventario de herramientas'), paragraphs: [t('Una tarjeta por conexión visible. La lista de colecciones indica si publicaron datos y cuándo; las métricas se calculan al leer sobre la última publicación de cada colección.'), t('Sin colección configurada o sin una corrida que haya publicado datos, una métrica figura como no disponible, nunca como cero. Si la publicación es parcial, el valor se marca y una proporción no se calcula. Sólo ves las conexiones con permiso de lectura.')] },
+      catalog: true, switcher: true, gate: 'open',
+      order: 14,
+      runtime: 'admin',
+      category: { id: 'connections', order: 1 },
+      command: { tool: 'dshub', platform: 'dshub', aliases: ['inventario de herramientas', 'herramientas integradas', 'estado de conectores', 'integraciones'], priority: 30 },
+    },
     {
       id: 'person', path: '/chains/person', legacyPaths: ['/connections/coverage'], domain: 'cross',
       label: t('Personas'), detail: t('¿Qué registros tiene una persona en cada herramienta?'), icon: UserRound,

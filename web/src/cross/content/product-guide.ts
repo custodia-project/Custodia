@@ -41,6 +41,7 @@ export const GUIDE_CONTENT: Record<GuideSectionId, GuideSectionContent> = {
       { view: 'safes', label: t('Abrir Safes') },
       { view: 'person', label: t('Abrir Personas') },
       { view: 'netskope', label: t('Abrir Métricas Netskope') },
+      { view: 'inventory', label: t('Abrir Inventario') },
     ],
   },
   personas: {

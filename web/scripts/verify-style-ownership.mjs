@@ -13,6 +13,7 @@ const ownedStyles = [
   ['cross/components/auth-view.tsx', 'cross/components/auth-view.css'],
   ['cross/components/home-workspace.tsx', 'cross/components/home-workspace.css'],
   ['cross/components/connection-inventory-workspace.tsx', 'cross/components/connection-inventory-workspace.css'],
+  ['cross/components/tool-inventory-workspace.tsx', 'cross/components/tool-inventory-workspace.css'],
   ['cross/components/sync-schedule-view.tsx', 'cross/components/sync-schedule-view.css'],
   ['cross/components/stale-data-banner.tsx', 'cross/components/stale-data-banner.css'],
   ['cyberark/identity_administration/components/identity-drawer.tsx', 'cyberark/identity_administration/components/identity-drawer.css'],

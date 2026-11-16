@@ -56,6 +56,9 @@ func (s *Store) ServePrincipal(w http.ResponseWriter, r *http.Request, current t
 	if s.serveSyncAPI(w, r, current, principal) {
 		return
 	}
+	if s.serveInventoryAPI(w, r, current, principal) {
+		return
+	}
 	if r.Method != "GET" {
 		send(405, map[string]string{"detail": "Laboratorio de sólo lectura."})
 		return

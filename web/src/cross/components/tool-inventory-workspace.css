@@ -1,0 +1,96 @@
+/* Inventario de herramientas: una tarjeta por conexión visible y una grilla de
+   métricas declaradas por el conector. Los colores salen de los tokens
+   compartidos; los estados usan los badges semánticos existentes. */
+
+.tool-inventory { display: grid; gap: 0; }
+
+.tool-inventory-intro { padding-bottom: 2px; }
+
+.tool-inventory-note { color: var(--text-secondary); font-size: 12px; line-height: 1.55; margin: 0; padding: 0 18px 14px; }
+
+.tool-inventory-card { padding-bottom: 4px; }
+
+.tool-inventory-head { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; padding: 18px 18px 12px; }
+
+.tool-inventory-head h2 { color: var(--text-primary); font-size: 15px; font-weight: 600; margin: 0; }
+
+.tool-inventory-head p { color: var(--text-muted); font-size: 11px; margin: 4px 0 0; }
+
+.tool-inventory-head code { font-size: 10px; }
+
+.tool-inventory-status { display: flex; flex-wrap: wrap; gap: 18px; margin: 0; }
+
+.tool-inventory-status div { display: grid; gap: 4px; }
+
+.tool-inventory-status dt { color: var(--text-muted); font-size: 10px; letter-spacing: .02em; text-transform: uppercase; }
+
+.tool-inventory-status dd { align-items: center; color: var(--text-secondary); display: flex; flex-wrap: wrap; font-size: 11px; gap: 6px; margin: 0; }
+
+.tool-collections { border-block: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; gap: 6px 14px; list-style: none; margin: 0; padding: 10px 18px; }
+
+.tool-collections li { align-items: center; color: var(--text-secondary); display: inline-flex; flex-wrap: wrap; font-size: 11px; gap: 6px; }
+
+.tool-collections code { color: var(--text-primary); font-size: 10px; }
+
+.tool-metrics { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); list-style: none; margin: 0; padding: 14px 18px 16px; }
+
+.tool-metric { background: var(--bg-subtle); border: 1px solid var(--border-soft); border-radius: 10px; display: grid; gap: 6px; padding: 12px 13px; }
+
+.tool-metric.is-selected { border-color: var(--accent); box-shadow: var(--focus-ring); }
+
+.tool-metric-head { align-items: flex-start; display: flex; gap: 8px; justify-content: space-between; }
+
+.tool-metric-name { color: var(--text-primary); font-size: 12px; font-weight: 600; line-height: 1.35; }
+
+.tool-metric-open { background: none; border: 0; color: inherit; cursor: pointer; justify-self: start; padding: 0; text-align: left; }
+
+.tool-metric-open:focus-visible { border-radius: 6px; outline: 2px solid var(--accent-strong); outline-offset: 3px; }
+
+.tool-metric-open:hover .tool-metric-figure strong { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+
+.tool-metric-figure { align-items: baseline; display: inline-flex; gap: 6px; }
+
+.tool-metric-figure strong { color: var(--text-primary); font-size: 24px; font-variant-numeric: tabular-nums; font-weight: 650; line-height: 1.1; }
+
+.tool-metric-figure span { color: var(--text-muted); font-size: 11px; }
+
+.tool-metric.is-empty .tool-metric-figure strong { color: var(--text-secondary); font-size: 15px; font-weight: 500; }
+
+.tool-metric-note { color: var(--text-secondary); font-size: 11px; line-height: 1.45; margin: 0; }
+
+.tool-metric-date { color: var(--text-muted); font-size: 10px; margin: 0; }
+
+.tool-metric-explain { border-top: 1px dashed var(--border-soft); color: var(--text-secondary); font-size: 10px; padding-top: 6px; }
+
+.tool-metric-explain summary { color: var(--text-muted); cursor: pointer; font-size: 10px; }
+
+.tool-metric-explain p { line-height: 1.5; margin: 6px 0 0; }
+
+.tool-metric-formula { font-family: var(--font-mono); font-size: 10px; }
+
+.tool-metric-id code { color: var(--text-muted); font-size: 9px; overflow-wrap: anywhere; }
+
+.tool-metric-records { border-top: 1px solid var(--border-soft); margin-top: 2px; padding: 4px 18px 16px; }
+
+.tool-metric-records .activity-meta { padding-inline: 0; }
+
+.tool-inventory-warning { color: var(--text-secondary); font-size: 11px; line-height: 1.5; margin: 8px 0 0; }
+
+.tool-records-scroll { border: 1px solid var(--border-soft); border-radius: 8px; margin-top: 10px; max-height: 420px; overflow: auto; }
+
+.tool-records-table { border-collapse: collapse; font-size: 11px; min-width: 100%; }
+
+.tool-records-table th, .tool-records-table td { border-top: 1px solid var(--border-soft); padding: 8px 10px; text-align: left; vertical-align: top; }
+
+.tool-records-table thead th { background: var(--bg-subtle); color: var(--text-muted); font-size: 10px; font-weight: 500; position: sticky; top: 0; }
+
+.tool-records-table tbody th { color: var(--text-primary); font-weight: 500; white-space: nowrap; }
+
+.tool-records-table tbody th code { font-size: 10px; }
+
+.tool-records-table tbody td { color: var(--text-secondary); max-width: 280px; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .tool-inventory-head, .tool-collections, .tool-metrics, .tool-metric-records { padding-inline: 14px; }
+  .tool-metrics { grid-template-columns: 1fr; }
+}

@@ -17,7 +17,7 @@ export const E2E_GROUPS = {
   ],
   cross: [
     'cross/activity.spec.ts', 'cross/api-request-count.spec.ts', 'cross/auth.spec.ts', 'cross/compact-select.spec.ts', 'cross/dashboard-settings.spec.ts', 'cross/dashboard.spec.ts',
-    'cross/help.spec.ts', 'cross/identity-links.spec.ts', 'cross/metric-reading.spec.ts', 'cross/motion.spec.ts',
+    'cross/help.spec.ts', 'cross/identity-links.spec.ts', 'cross/inventory.spec.ts', 'cross/metric-reading.spec.ts', 'cross/motion.spec.ts',
     'cross/person-client-coverage.spec.ts', 'cross/person-connections-ux.spec.ts', 'cross/person.spec.ts',
     'cross/sync-runs.spec.ts', 'cross/sync-status.spec.ts', 'cross/toast.spec.ts', 'cross/ux-aud.spec.ts',
   ],

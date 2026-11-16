@@ -55,6 +55,55 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
     person.identities.push(user);
   }
   let workspacePreferences = { visible_workspaces: initialVisibleWorkspaces, hidden_workspaces: [] as string[], recent_workspaces: initialRecentWorkspaces, updated_at: null as string | null };
+  // Synthetic PAM inventory: the same contract as the Go reader, with one
+  // connected tool group and its declared metrics.
+  const inventoryRun = (run_id: string, completed_at: string) => ({ run_id, status: 'completed', completed_at });
+  const inventorySource = (collection: string, run: string, at: string) => ({ collection, connection_id: `acme-pam-${collection}`, run_id: run, status: 'completed', completed_at: at });
+  const inventorySafes = [
+    { external_id: '1', collection: 'safes', connection_id: 'acme-pam-safes', attributes: { safe_name: 'ACME-PROD-PLATFORM', safe_url_id: 'ACME-PROD-PLATFORM', location: 'Acme DC' } },
+    { external_id: '2', collection: 'safes', connection_id: 'acme-pam-safes', attributes: { safe_name: 'ACME-DEV-SERVICES', safe_url_id: 'ACME-DEV-SERVICES', location: 'Acme DC' } },
+  ];
+  const inventoryAccounts = [
+    { external_id: '1:acme-account-001', collection: 'accounts', connection_id: 'acme-pam-accounts', attributes: { safe_number: '1', safe_name: 'ACME-PROD-PLATFORM', account_id: 'acme-account-001', account_name: 'prod-api-admin', user_name: 'svc_api_admin', address: '192.0.2.10', platform_id: 'Unix', automatic_management_enabled: 'true', management_status: 'success' } },
+    { external_id: '1:acme-account-002', collection: 'accounts', connection_id: 'acme-pam-accounts', attributes: { safe_number: '1', safe_name: 'ACME-PROD-PLATFORM', account_id: 'acme-account-002', account_name: 'prod-db-admin', user_name: 'dbadmin', address: '192.0.2.20', platform_id: 'PostgreSQL', automatic_management_enabled: 'true', management_status: 'success' } },
+    { external_id: '2:acme-account-003', collection: 'accounts', connection_id: 'acme-pam-accounts', attributes: { safe_number: '2', safe_name: 'ACME-DEV-SERVICES', account_id: 'acme-account-003', account_name: 'dev-services-admin', user_name: 'svc_dev', address: '192.0.2.30', platform_id: 'Unix', automatic_management_enabled: 'false', management_status: 'success' } },
+  ];
+  const inventoryRecords: Record<string, Array<Record<string, unknown>>> = {
+    'cyberark-pam.safes.total.v1': inventorySafes,
+    'cyberark-pam.safes.without_members.v1': [],
+    'cyberark-pam.accounts.total.v1': inventoryAccounts,
+    'cyberark-pam.accounts.auto_management_disabled.v1': inventoryAccounts.filter((record) => record.attributes.automatic_management_enabled === 'false'),
+    'cyberark-pam.accounts.auto_management_disabled_ratio.v1': inventoryAccounts.filter((record) => record.attributes.automatic_management_enabled === 'false'),
+    'cyberark-pam.accounts.last_change_failed.v1': [],
+    'cyberark-pam.platforms.inactive.v1': [],
+    'cyberark-pam.platforms.psm_unresolved.v1': [],
+  };
+  const inventoryTools = {
+    generated_at: '2026-11-16T12:00:00Z',
+    tools: [{
+      connection_id: 'acme-pam',
+      connector: 'cyberark-pam-safes-v1',
+      name: 'CyberArk PAM',
+      vendor: 'CyberArk',
+      category: 'PAM',
+      completeness: 'complete',
+      last_run: inventoryRun('demo-run-accounts', '2026-11-16T11:31:00Z'),
+      collections: [
+        { collection: 'safes', connection_id: 'acme-pam-safes', state: 'completed', records: 2, publication: inventoryRun('demo-run-safes', '2026-11-16T11:30:00Z'), last_run: inventoryRun('demo-run-safes', '2026-11-16T11:30:00Z') },
+        { collection: 'accounts', connection_id: 'acme-pam-accounts', state: 'completed', records: 3, publication: inventoryRun('demo-run-accounts', '2026-11-16T11:31:00Z'), last_run: inventoryRun('demo-run-accounts', '2026-11-16T11:31:00Z') },
+      ],
+      metrics: [
+        { id: 'cyberark-pam.safes.total.v1', connector: 'cyberark-pam-safes-v1', name: t('Safes totales'), description: t('Safes activos en la última publicación de la colección safes de esta conexión.'), collection: 'safes', kind: 'count', unit: 'safes', status: 'available', value: 2, partial: false, data_as_of: '2026-11-16T11:30:00Z', sources: [inventorySource('safes', 'demo-run-safes', '2026-11-16T11:30:00Z')] },
+        { id: 'cyberark-pam.safes.without_members.v1', connector: 'cyberark-pam-safes-v1', name: t('Safes sin miembros'), description: t('Safes cuyo número no aparece como safe_number de ningún miembro. Requiere safe_members; si es parcial no se calcula.'), collection: 'safes', kind: 'count_without', unit: 'safes', status: 'unavailable', value: null, partial: false, reason: 'collection_unavailable', without: { collection: 'safe_members', field: 'safe_number' }, sources: [inventorySource('safes', 'demo-run-safes', '2026-11-16T11:30:00Z'), { collection: 'safe_members', connection_id: 'acme-pam-safe-members' }] },
+        { id: 'cyberark-pam.accounts.total.v1', connector: 'cyberark-pam-safes-v1', name: t('Cuentas totales'), description: t('Cuentas activas (metadatos sin secretos) en la última publicación de la colección accounts.'), collection: 'accounts', kind: 'count', unit: 'accounts', status: 'available', value: 3, partial: false, data_as_of: '2026-11-16T11:31:00Z', sources: [inventorySource('accounts', 'demo-run-accounts', '2026-11-16T11:31:00Z')] },
+        { id: 'cyberark-pam.accounts.auto_management_disabled.v1', connector: 'cyberark-pam-safes-v1', name: t('Cuentas con gestión automática deshabilitada'), description: t('Cuentas con automatic_management_enabled=false. Una cuenta sin ese dato no se cuenta.'), collection: 'accounts', kind: 'count_where', unit: 'accounts', where: { field: 'automatic_management_enabled', values: ['false'] }, status: 'available', value: 1, partial: false, data_as_of: '2026-11-16T11:31:00Z', sources: [inventorySource('accounts', 'demo-run-accounts', '2026-11-16T11:31:00Z')] },
+        { id: 'cyberark-pam.accounts.auto_management_disabled_ratio.v1', connector: 'cyberark-pam-safes-v1', name: t('Proporción de cuentas sin gestión automática'), description: t('Cuentas con gestión automática deshabilitada sobre las cuentas que informan ese dato (true o false). No se calcula sobre una publicación parcial.'), collection: 'accounts', kind: 'ratio', unit: 'percent', where: { field: 'automatic_management_enabled', values: ['false'] }, denominator_where: { field: 'automatic_management_enabled', values: ['true', 'false'] }, status: 'available', value: 33.3, partial: false, numerator: 1, denominator: 3, data_as_of: '2026-11-16T11:31:00Z', sources: [inventorySource('accounts', 'demo-run-accounts', '2026-11-16T11:31:00Z')] },
+        { id: 'cyberark-pam.accounts.last_change_failed.v1', connector: 'cyberark-pam-safes-v1', name: t('Cuentas con último cambio fallido'), description: t('Cuentas cuyo management_status normalizado es failure.'), collection: 'accounts', kind: 'count_where', unit: 'accounts', where: { field: 'management_status', values: ['failure'] }, status: 'available', value: 0, partial: false, data_as_of: '2026-11-16T11:31:00Z', sources: [inventorySource('accounts', 'demo-run-accounts', '2026-11-16T11:31:00Z')] },
+        { id: 'cyberark-pam.platforms.inactive.v1', connector: 'cyberark-pam-safes-v1', name: t('Plataformas inactivas'), description: t('Plataformas con active=false.'), collection: 'platforms', kind: 'count_where', unit: 'platforms', where: { field: 'active', values: ['false'] }, status: 'unavailable', value: null, partial: false, reason: 'collection_unavailable', sources: [{ collection: 'platforms', connection_id: 'acme-pam-platforms' }] },
+        { id: 'cyberark-pam.platforms.psm_unresolved.v1', connector: 'cyberark-pam-safes-v1', name: t('Plataformas con PSM sin resolver'), description: t('Vínculos plataforma→PSM con resolución missing o ambiguous.'), collection: 'platform_psm_links', kind: 'count_where', unit: 'platforms', where: { field: 'resolution', values: ['missing', 'ambiguous'] }, status: 'unavailable', value: null, partial: false, reason: 'collection_unavailable', sources: [{ collection: 'platform_psm_links', connection_id: 'acme-pam-platform-psm-links' }] },
+      ],
+    }],
+  };
   const handler = async (route: MockRoute) => {
     const requestUrl = new URL(route.request().url());
     const pathname = requestUrl.pathname;
@@ -334,6 +383,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
         changed_30d: 1, changed_90d: 1, changed_365d: 0, changed_older: 0, changed_unknown: 1,
       },
       '/api/ingestion/runs': { rows: [] },
+      '/api/inventory/tools': inventoryTools,
       '/api/events': { rows: [] },
       '/api/workspaces/preferences': { visible_workspaces: ['safes'], hidden_workspaces: [], recent_workspaces: [], updated_at: null },
       '/api/search': {
@@ -596,6 +646,26 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
     let responseBody = bodies[pathname] ?? {};
     let responseStatus = 200;
     const method = route.request().method();
+    if (pathname.startsWith('/api/inventory/metrics/') && pathname.endsWith('/records')) {
+      const metricId = decodeURIComponent(pathname.slice('/api/inventory/metrics/'.length, -'/records'.length));
+      const connectionId = requestUrl.searchParams.get('connection') ?? '';
+      const tool = inventoryTools.tools.find((candidate) => candidate.connection_id === connectionId);
+      const metric = tool?.metrics.find((candidate) => candidate.id === metricId);
+      if (!tool || !metric) {
+        responseStatus = 404;
+        responseBody = { detail: t('Métrica o conexión no encontrada.') };
+      } else {
+        const records = inventoryRecords[metricId] ?? [];
+        const rawLimit = Number(requestUrl.searchParams.get('limit') ?? 200);
+        const limit = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 1000) : 200;
+        responseBody = { connection_id: connectionId, metric, records: records.slice(0, limit), total: records.length, limit, truncated: records.length > limit };
+      }
+    }
+    if (pathname === '/api/auth/status') {
+      responseBody = signedIn
+        ? { mode: authMode, authenticated: true, permissions, api_docs_enabled: apiDocsEnabled, ...(authMode === 'local' ? { csrf_token: csrfToken } : {}), user: currentUser }
+        : { ...unauthenticated, mode: authMode };
+    }
     if (pathname === '/api/auth/login' && method === 'POST') {
       const payload = (route.request().postDataJSON() ?? {}) as { username?: string; email?: string; password?: string };
       const username = String(payload.username ?? payload.email ?? '').trim().toLowerCase();
@@ -861,7 +931,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
 const WORKSPACE_PREFERENCE_ALLOWLIST = new Set([
   'general', 'posture', 'graph', 'person', 'safes', 'roles', 'platforms', 'connectors', 'pamCleanup',
   'identityUsers', 'identityGroups', 'identityRoles', 'sia', 'identity', 'assets',
-  'users', 'activity', 'help', 'pamHealth', 'siaConnectors',
+  'users', 'activity', 'help', 'pamHealth', 'siaConnectors', 'inventory',
    'siaResources', 'siaDatabaseAccounts', 'identityFederations', 'ipInventory',
   'netskope', 'netskopeOperations', 'netskopeChains', 'netskopeInventory', 'netskopeUsers', 'netskopeDevices',
   'netskopeDlp', 'netskopeDemSites', 'netskopeUci', 'netskopePosture', 'netskopeAdmins', 'netskopeOfficeExperience',

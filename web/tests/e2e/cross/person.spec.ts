@@ -478,8 +478,9 @@ test('CONN-NAV-001: Ayuda belongs to Conexiones and Administración keeps restri
   const menu = page.getByRole('region', { name: 'Workspaces' });
   await expect(menu.locator('.workspace-menu-header')).toContainText('Vistas de Conexiones');
   const links = menu.locator('[data-section="tool-workspaces"] a.workspace-domain-link');
-  await expect(links).toHaveCount(2);
+  await expect(links).toHaveCount(3);
   await expect(menu.getByRole('link', { name: /^Personas\b/ })).toBeVisible();
+  await expect(menu.getByRole('link', { name: /^Inventario\b/ })).toBeVisible();
   await expect(menu.getByRole('link', { name: /^Cobertura de cliente\b/ })).toHaveCount(0);
   await expect(menu.getByRole('link', { name: /^Usuarios y permisos\b/ })).toHaveCount(0);
   await expect(menu.getByRole('link', { name: /^Actividad\b/ })).toHaveCount(0);

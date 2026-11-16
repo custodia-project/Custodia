@@ -11,6 +11,7 @@ import { t } from '../i18n/index.ts';
 const UsersWorkspace = lazy(() => import('../components/users-workspace').then((module) => ({ default: module.UsersWorkspace })));
 const ActivityWorkspace = lazy(() => import('../components/activity-workspace').then((module) => ({ default: module.ActivityWorkspace })));
 const HelpWorkspace = lazy(() => import('../components/help-workspace').then((module) => ({ default: module.HelpWorkspace })));
+const ToolInventoryWorkspace = lazy(() => import('../components/tool-inventory-workspace').then((module) => ({ default: module.ToolInventoryWorkspace })));
 
 type AdminDomainRouterProps = {
   workspaceView: WorkspaceView;
@@ -41,6 +42,7 @@ export function AdminDomainRouter({
       onError={(message) => { onNotice(''); onError(message); }}
     />}
     {workspaceView === 'activity' && <ActivityWorkspace permissions={permissions} onUnauthorized={onUnauthorized} />}
+    {workspaceView === 'inventory' && <ToolInventoryWorkspace onUnauthorized={onUnauthorized} />}
     {workspaceView === 'help' && <HelpWorkspace
       apiDocsEnabled={apiDocsEnabled === true}
       requestedSection={guideSection ?? null}

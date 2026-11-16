@@ -15,6 +15,23 @@ type Preferences struct {
 	Updated *string  `json:"updated_at"`
 }
 
+// allowedWorkspaces mirrors the frontend workspace catalog. Preferences are
+// per-actor, so this is a contract check, not an authorization boundary: an
+// unknown ID is rejected instead of being echoed into the stored document.
+var allowedWorkspaces = map[string]bool{
+	"general": true, "posture": true, "graph": true, "person": true, "safes": true,
+	"roles": true, "platforms": true, "connectors": true, "pamCleanup": true,
+	"identityUsers": true, "identityGroups": true, "identityRoles": true,
+	"identityFederations": true, "sia": true, "siaResources": true,
+	"siaDatabaseAccounts": true, "siaConnectors": true, "identity": true,
+	"assets": true, "inventory": true, "users": true, "activity": true,
+	"help": true, "pamHealth": true, "netskopeInventory": true,
+	"netskopeUsers": true, "netskopeDevices": true, "netskopeDlp": true,
+	"netskopePosture": true, "netskopeOperations": true, "netskopeOfficeExperience": true,
+	"netskopeChains": true, "netskopeAdmins": true, "netskopeUci": true,
+	"netskopeDemSites": true,
+}
+
 func (s *Store) preferences(w http.ResponseWriter, r *http.Request, now time.Time, principal Principal) {
 	fail := func(code int) {
 		w.WriteHeader(code)
@@ -69,17 +86,24 @@ func (s *Store) preferences(w http.ResponseWriter, r *http.Request, now time.Tim
 			dst *[]string
 		}{{patch.Visible, &after.Visible}, {patch.Hidden, &after.Hidden}, {patch.Recent, &after.Recent}} {
 			if field.src != nil {
-				if len(*field.src) > 1 {
+				if len(*field.src) > 64 {
 					fail(400)
 					return
 				}
+				seen := map[string]bool{}
+				values := make([]string, 0, len(*field.src))
 				for _, view := range *field.src {
-					if view != "person" {
+					if !allowedWorkspaces[view] {
 						fail(403)
 						return
 					}
+					if seen[view] {
+						continue
+					}
+					seen[view] = true
+					values = append(values, view)
 				}
-				*field.dst = *field.src
+				*field.dst = values
 			}
 		}
 		stamp := now.UTC().Format(time.RFC3339)
