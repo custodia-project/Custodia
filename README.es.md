@@ -88,13 +88,13 @@ estos dos fabricantes.
 
 ## Estado y hoja de ruta
 
-Custodia es un prototipo honesto. La interfaz está completa; el backend,
-todavía no.
+Custodia es un prototipo honesto. La interfaz corre contra datos sintéticos; el laboratorio Go/SQLite inicia
+la migración del backend. Las integraciones reales siguen pendientes.
 
 | Etapa | Qué | Estado |
 |---|---|---|
 | Demo | Personas cruzadas entre CyberArk y Netskope, veredictos con evidencia e inventario de cada herramienta, en español e inglés. Corre entera en el navegador. | Hecho |
-| Backend | Go y PostgreSQL; las reglas existentes pasan con sus pruebas de regresión. | En curso |
+| Backend | Go y SQLite; las reglas existentes pasan con sus pruebas de regresión. | En curso |
 | Autohospedado | Adaptadores reales de CyberArk y Netskope, ingreso por OIDC e instalación reproducible. | Siguiente |
 | Más fuentes | Herramientas de datos, endpoint, vulnerabilidades y firewalls. | Después |
 
@@ -146,7 +146,7 @@ envuelven como `t('Texto en español')` y el inglés vive en
 |---|---|
 | Alcance y etapas | [Producto](docs/PRODUCT.md) |
 | Empresa ficticia, sitio y demo | [WEB.md](docs/WEB.md) · [COMPANY-DEMO.md](docs/COMPANY-DEMO.md) |
-| Go y PostgreSQL | [Arquitectura](docs/ARCHITECTURE.md) |
+| Go y SQLite | [Arquitectura](docs/ARCHITECTURE.md) |
 | Configurar y sincronizar herramientas | [Conectores](docs/CONNECTORS.md) |
 | Ingreso, OIDC y QA | [Acceso](docs/ACCESS.md) |
 | Interfaz y recorrido de ejemplo | [Diseño](docs/DESIGN.md) |
@@ -163,3 +163,20 @@ Custodia nació como herramienta interna (DS Hub) y hoy es open source con
 licencia [Apache 2.0](LICENSE). CyberArk, Netskope y los demás nombres de
 producto son marcas de sus dueños e identifican las herramientas que Custodia
 lee; Custodia no está afiliado a ellos.
+
+## Laboratorio del backend Go
+
+La primera instalación autohospedada usará SQLite en disco local para evitar
+un servicio de base de datos separado. Ya existe un [laboratorio Go](server/README.md)
+de Personas/cobertura con datos sintéticos, inicialización explícita y API de
+lectura. No es todavía una instalación empresarial ni sustituye la demo pública.
+
+```bash
+npm run verify:go
+npm run verify:go:web  # interfaz real → API Go → SQLite temporal
+```
+
+El modo `serve` incorpora un receptor de identidad firmada de Ozal y el alta
+explícita del primer administrador. `npm run verify:go:gateway` prueba ingreso,
+permisos y logout con la UI real y un gateway temporal. Falta aceptar la
+integración contra una instancia real de Ozal; ver [acceso](docs/ACCESS.md).

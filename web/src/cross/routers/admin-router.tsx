@@ -14,7 +14,7 @@ const HelpWorkspace = lazy(() => import('../components/help-workspace').then((mo
 
 type AdminDomainRouterProps = {
   workspaceView: WorkspaceView;
-  authMode?: 'local' | 'oidc' | 'hybrid';
+  authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal';
   currentActorId?: string;
   currentUserEmail?: string | null;
   permissions: string[];

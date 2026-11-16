@@ -1,7 +1,7 @@
 ---
 estado: vigente
 dueño: Octavio Santacruz
-revisado: 2026-10-22
+revisado: 2026-11-16
 ---
 
 # Aceptación, distribución y crecimiento
@@ -26,7 +26,7 @@ Publicación es una acción posterior autorizada, no efecto del build.
 
 ## Autohospedado: utilidad real
 
-Una instalación por equipo con base PostgreSQL propia; API/worker Go y UI
+Una instalación por equipo con base SQLite propia en disco local; API/worker Go y UI
 React. Primer adaptador real acotado y de lectura, además del conector de
 laboratorio. Recomendación inicial: inventario de Safes de PAM, por la base
 contractual existente; no implica portar cuentas, secretos, sesiones, SIA ni

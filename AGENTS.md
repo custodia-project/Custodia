@@ -29,8 +29,9 @@ aceptación deja de bloquear Go. La referencia contractual está en Python.
   su backlog laboral. Demo vigente: `web/` con `npm run build:demo`,
   publicada como proyecto de Pages aparte; ver docs/WEB.md. La UI propia del
   22/10 se retiró (consultar `617f460`). `demo/` conserva el experimento reducido.
-  Sin backend Go ni autenticación real.
-- Backend objetivo Go; PostgreSQL autoridad; React/TypeScript para interfaz.
+  Backend Go con laboratorio sintético y receptor de aserciones Ozal;
+  aceptación con instancia real y despliegue pendientes.
+- Backend objetivo Go; SQLite autoridad en la primera instalación de una sola instancia (decisión del dueño, 16/11); React/TypeScript para interfaz.
   Versiones y dependencias se fijan al implementar. No hay librería compartida
   ni importación aprobada con SIGEA.
 - Aislar registros por conexión, colección e ID externo. Cruces e inferencias

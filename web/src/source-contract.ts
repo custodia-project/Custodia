@@ -92,7 +92,7 @@ export type SourceRouterProps = {
   onNotice: (message: string) => void;
   onDashboardLoad: (load: ((options?: { refreshStatic?: boolean }) => Promise<void>) | null) => void;
   onLatestRun: (run: IngestionRun | null) => void;
-  authMode?: 'local' | 'oidc' | 'hybrid';
+  authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal';
   currentActorId?: string;
   currentUserEmail?: string | null;
   apiDocsEnabled?: boolean;

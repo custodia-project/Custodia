@@ -13,7 +13,7 @@ registerHooks({
     return result;
   },
 });
-const { api, ApiError, messageForStatus } = await import('../../src/cross/lib/api.ts');
+const { api, ApiError, messageForStatus, logout } = await import('../../src/cross/lib/api.ts');
 
 function mockFetch(factory: () => Promise<Response>) {
   const original = globalThis.fetch;
@@ -57,4 +57,26 @@ test('a network failure becomes an ApiError with status 0, while aborts pass thr
   try {
     await assert.rejects(api('/auth/status'), (error: unknown) => error instanceof DOMException && error.name === 'AbortError');
   } finally { restore(); }
+});
+
+
+test('gateway logout submits a POST on this origin and ignores arbitrary redirect URLs', async () => {
+  const previousDocument = globalThis.document;
+  let submitted = 0;
+  const form = { method: '', action: '', submit: () => { submitted++; } };
+  globalThis.document = { createElement: (tag: string) => { assert.equal(tag, 'form'); return form; }, body: { appendChild: (element: unknown) => { assert.equal(element, form); } } } as unknown as Document;
+  const restore = mockFetch(async () => new Response(JSON.stringify({ gateway_logout: true, redirect_url: 'https://attacker.example/' }), { headers: { 'Content-Type': 'application/json' } }));
+  try {
+    assert.equal(await logout(), true);
+    assert.equal(submitted, 1);
+    assert.equal(form.method, 'POST');
+    assert.equal(form.action, '/_/auth/logout');
+  } finally { restore(); if (previousDocument === undefined) Reflect.deleteProperty(globalThis, 'document'); else globalThis.document = previousDocument; }
+});
+
+test('legacy successful logout does not require a gateway payload or DOM', async () => {
+  for (const body of ['', 'null', '{"ok":true}']) {
+    const restore = mockFetch(async () => new Response(body, { headers: { 'Content-Type': 'application/json' } }));
+    try { assert.equal(await logout(), true); } finally { restore(); }
+  }
 });

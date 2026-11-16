@@ -8,7 +8,7 @@ import './user-admin.css';
 import { t } from '../i18n/index.ts';
 
 type UsersWorkspaceProps = {
-  authMode?: 'local' | 'oidc' | 'hybrid';
+  authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal';
   currentActorId?: string;
   currentUserEmail?: string | null;
   permissions: string[];

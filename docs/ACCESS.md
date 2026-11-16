@@ -1,83 +1,109 @@
 ---
 estado: vigente
 dueño: Octavio Santacruz
-revisado: 2026-10-22
+revisado: 2026-11-16
 ---
 
-# Acceso: Switchboard, OIDC y pruebas
+# Acceso: Ozal, autorización y pruebas
 
-**Recomendación pendiente de aceptación técnica:** usar Switchboard como
-entrada para la instalación del dueño; ofrecer OIDC genérico para una
-instalación independiente. No portar el acoplamiento a Okta, grupos laborales
-ni el modo híbrido de la versión anterior. Ninguno de los modos siguientes
-está implementado en el producto Go.
+El backend Go implementa un receptor de identidad firmada de Ozal por
+petición. El alta inicial del administrador es un comando explícito en el
+host. La integración se verifica con claves efímeras y un gateway de prueba;
+la aceptación contra una instancia real de Ozal y su despliegue siguen pendientes.
+OIDC genérico todavía es un diseño, no otro modo disponible.
 
-## Tres contextos explícitos
+## Modos separados
 
-| Contexto | Autenticación propuesta | Qué conserva Custodia |
+| Contexto | Entrada | Autoridad de Custodia |
 |---|---|---|
-| Demo pública | Sin login, sólo datos sintéticos y estado local del ejemplo. | Ningún acceso a cuentas, inventario o backend privado. |
-| Instalación detrás de Switchboard | Modo `switchboard`, identidad verificable por petición. | Usuarios locales de autorización, permisos, alcances por conexión y auditoría. |
-| Instalación independiente | Modo `oidc`, Custodia como cliente de un proveedor compatible. | Sus propias sesiones revocables, permisos y auditoría. |
+| Demo pública | Sin login, datos sintéticos. | Ningún acceso a inventario privado. |
+| `serve` detrás de Ozal | Aserción firmada nueva para cada petición, también assets. | Principales habilitados, permisos por conexión y auditoría. |
+| `serve-lab` | Bearer aleatorio de laboratorio, sólo loopback. | Principales sintéticos y concesiones explícitas. |
 
-El modo se selecciona al configurar la instalación; no se mezclan mecanismos
-ni se activa login local cuando falla el gateway o el proveedor. Elegir
-Switchboard no requiere que Custodia implemente OIDC para ese recorrido.
+Ambos servidores escuchan sólo en IP numérica loopback. Eso no autentica al
+usuario: serve exige la firma incluso con acceso directo. No admite token de
+laboratorio, cookie de aplicación, headers de usuario/email ni login local.
+No hay fallback cuando falla Ozal. La instalación debe cerrar también los
+caminos directos al backend y proteger su host.
 
-## Switchboard: situación comprobada y contrato por construir
+## Contrato firmado
 
-En el checkout revisado de Switchboard, las rutas protegidas del proceso
-integrado autentican y autorizan antes del túnel. La identidad viaja por
-`X-Switchboard-Visitor-User` y `X-Switchboard-Visitor-Email` dentro del túnel
-mTLS; el conector valida esos campos y entrega a la app
-`X-Auth-Request-User` y `X-Auth-Request-Email`.
+Se contrastó el receptor con docs/reference.md del checkout vecino de Ozal.
+Ozal autentica al visitante, aplica su política y reemplaza los headers de
+identidad del cliente. Entrega X-Ozal-Assertion como JWS compacto EdDSA con
+clave Ed25519. Custodia verifica mediante go-jose/v4, sin criptografía propia:
 
-Esto autentica el tramo edge–conector; los headers recibidos por Custodia
-**no son una aserción firmada verificable por la aplicación**. No basta
-confiar en ellos porque provengan de loopback o una IP privada: hay que
-autenticar y restringir también el salto conector–app y cerrar acceso directo.
-El certificado del conector tampoco identifica al usuario.
+- Un solo header, sin alias con guiones bajos; algoritmo permitido y kid conocido.
+- Claves públicas PKIX PEM fijadas en archivos de configuración. kid es el
+  hexadecimal de los primeros 16 bytes SHA-256 de la clave pública cruda.
+  No se descargan claves ni se aceptan JWK, jku o x5u dentro del token.
+- Emisor y audiencia exactos; sujeto opaco y jti obligatorios; iat y exp con
+  duración máxima de 60 segundos y tolerancia de reloj de 5 segundos.
+- jti de un solo uso por emisor, consumido transaccionalmente en SQLite antes
+  de autorizar. Persiste al reiniciar y se comparte entre procesos de la base.
+  Se retiene hasta exp más la tolerancia; se limpian vencidos por petición.
+  El límite es 65.536 entradas: saturación o fallo de almacenamiento rechazan
+  con 503, sin expulsar entradas vigentes. Replay o firma inválida da 401.
 
-Para el primer recorrido recomiendo la aserción firmada propuesta por
-Switchboard en `docs/architecture/identity-integration.md`, opción C:
+La configuración exige issuer HTTPS y public_origin HTTPS sin ruta, usuario,
+query ni fragmento. Para el harness local sólo se permite HTTP en IP numérica
+loopback. audience y public_key_files son explícitos. Hay un máximo de ocho
+claves públicas; la rotación carga temporalmente vieja y nueva, reinicia,
+cambia el emisor y luego retira la vieja/reinicia. La revocación de una clave
+requiere retirarla y reiniciar todos los procesos que la cargaron.
 
-1. Switchboard autentica al visitante, aplica su política y emite una aserción
-   breve y específica para Custodia en cada petición. Elimina todas las
-   variantes de headers de identidad enviados por el cliente.
-2. Custodia valida firma, algoritmo permitido, clave configurada, emisor,
-   audiencia, sujeto, vigencia y unicidad de `jti`. Nunca obtiene claves de
-   una URL indicada por el propio token. Configurar claves y rotación fuera
-   del flujo de la petición; definir tolerancia de reloj acotada.
-3. Vincula el par emisor/sujeto a un usuario de autorización habilitado.
-   Correo y nombre sólo sirven para presentación. Un usuario nuevo no recibe
-   privilegios por entrar al gateway; un administrador concede su alcance.
-4. Evalúa permiso y conexión en cada operación. No crea una sesión de app
-   que permita seguir operando al margen de las decisiones del gateway.
-5. La instalación cierra bypass directo IPv4/IPv6; el backend rechaza también
-   peticiones sin aserción válida. Ningún token, cookie o secreto va al log.
+## Primer administrador y lectores
 
-Antes de programar hay que fijar emisión por petición, TTL, almacenamiento
-compartido y acotado de replay, rotación/revocación, reintentos y auditoría
-con un ID de correlación seguro. Empezar con HTTP normal; conexiones largas
-requieren su propio contrato de revalidación. No convertir una propuesta JWT
-en una promesa de SSO ya disponible.
+init crea una base privada vacía: no inventario demo, usuario, contraseña ni
+token. bootstrap-admin toma la configuración del emisor, un sub confirmado
+fuera de banda y conexiones existentes explícitas; sin conexiones concede
+sólo administración inicial. El marcador persistido permite este bootstrap
+una sola vez. Crear principal, concesiones, rol y auditoría es atómico.
+No se enlaza por email ni se obtiene el rol de grupos del gateway.
 
-La alternativa de headers sobre un salto autenticado hasta la app puede
-evaluarse si hay una topología concreta; no habilitar un modo genérico de
-«confiar en cualquier proxy». El trabajo está en `PROD-SB-001`.
+Cada petición resuelve emisor/sub en la base y comprueba habilitación.
+Una identidad verificada pero desconocida o deshabilitada obtiene 403; nunca
+se aprovisiona al entrar. El rol administrador no concede acceso universal
+a las fuentes ni habilita los endpoints legacy de administración.
 
-Referencias del checkout vecino: `internal/pipeline/visitor.go`,
-`internal/proxy/connector_test.go` y
-`docs/architecture/tunnel-persistent.md`. La decisión `ARCH-009` sigue
-pendiente. Su tracker llama `ID-004` al futuro proveedor OIDC completo;
-el documento del túnel lo cita también para aserciones. Hay que resolver esa
-atribución en Switchboard antes de asignar implementación: no son la misma
-capacidad. Esta revisión no modifica ese repositorio.
+El administrador puede llamar POST /api/access/readers con subject y una lista
+explícita connections; crea un lector del mismo emisor, con un subconjunto
+de las conexiones que el administrador puede leer. Un sujeto existente falla,
+sin modificar concesiones. DELETE con subject deshabilita lectores cuyo
+alcance completo puede administrar; no permite deshabilitar administradores.
+Ambas operaciones se auditan en la misma transacción y requieren un Origin
+exactamente igual al public_origin configurado, como toda petición de escritura.
+No se confía en Host ni X-Forwarded-* para esa decisión. Todavía no existe
+pantalla para estas operaciones ni flujo de recuperación del administrador.
 
-Si Switchboard implementa y acepta su proveedor OIDC completo en el futuro,
-Custodia podría usar el modo `oidc` con ese emisor. Eso permitiría retirar
-el adaptador de aserciones tras probar paridad; no justifica construir un
-proveedor de identidad para destrabar la demo inicial.
+Las búsquedas, fichas y conexiones se filtran antes de correlacionar.
+Cobertura requiere permiso sobre ambas fuentes y la regla explícita del par.
+El sync, jobs, exportaciones y su autorización siguen pendientes.
+
+## Cierre de sesión
+
+POST /api/auth/logout valida identidad y Origin; devuelve gateway_logout.
+El frontend envía un formulario POST al path fijo del mismo origen
+/_/auth/logout. Ozal recibe su propia cookie y cierra la sesión del gateway;
+Custodia no mantiene una sesión paralela que permita evadirlo. No acepta un
+destino de logout indicado por la respuesta ni crea cookies de autenticación.
+
+## Laboratorio y evidencia
+
+init-lab agrega exclusivamente el fixture Acme y una credencial aleatoria en
+archivo privado. issue-lab/revoke-lab administran credenciales sintéticas
+(hash en SQLite), con concesiones e identidades separadas del emisor Ozal.
+La credencial inicial también respeta habilitación y concesiones. Este modo
+no es autenticación empresarial ni se activa desde serve.
+
+verify:go prueba firma, claims, claves/rotación, replay persistido/concurrente,
+saturación, bootstrap único, rollback de auditoría, CSRF, headers falsos,
+permisos, revocación y ausencia de fallback. verify:go:gateway usa la UI real,
+Go y SQLite con un proxy de prueba que firma cada petición: dos sujetos con
+el mismo correo/grupos, alta explícita, alcance, reinicio, replay, revocación
+y logout en navegador. El login del fixture es sólo una selección sintética;
+no prueba passkeys, cookies o políticas de una instalación real de Ozal.
+Ver [comandos y configuración](../server/README.md).
 
 ## Qué sería «OIDC propio» en Custodia
 
@@ -99,13 +125,12 @@ autenticar, Custodia crea una sesión opaca revocable en servidor: cookie
 Secure/HttpOnly/SameSite compatible con el callback, rotación, expiración y
 CSRF en mutaciones. Tokens y secretos permanecen en backend. Validar destinos
 de retorno y distinguir logout local de cierre de sesión del proveedor.
-No enlazar automáticamente cuentas de OIDC y Switchboard por email.
+No enlazar automáticamente cuentas de OIDC y Ozal por email.
 
 Validar con un proveedor simulado: código repetido, state/nonce ausentes,
 firma/emisor/audiencia incorrectos, expiración, rotación de claves, usuario
 deshabilitado, revocación local y permisos insuficientes. Un proveedor real
-se acepta después con su configuración de laboratorio. Alcance:
-`PROD-OIDC-001`, posterior al camino inicial con Switchboard.
+se acepta después con su configuración de laboratorio. Posterior al camino inicial con Ozal; ver el tracker.
 
 Referencias: [OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0.html)
 y [OAuth Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.html).

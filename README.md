@@ -94,7 +94,7 @@ not.
 | Stage | What | State |
 |---|---|---|
 | Demo | People crossed across CyberArk and Netskope, verdicts with evidence and each tool's inventory, in English and Spanish. Runs fully in the browser. | Done |
-| Backend | Go and PostgreSQL; the existing rules move over with their regression tests. | In progress |
+| Backend | Go and SQLite; the existing rules move over with their regression tests. | In progress |
 | Self-hosted | Real CyberArk and Netskope adapters, sign-in through OIDC, a reproducible install. | Next |
 | More sources | Data, endpoint, vulnerability and firewall tools. | Later |
 
@@ -147,7 +147,7 @@ The project documentation is written in Spanish.
 |---|---|
 | Scope and stages | [Product](docs/PRODUCT.md) |
 | Fictional company, site and demo | [WEB.md](docs/WEB.md) · [COMPANY-DEMO.md](docs/COMPANY-DEMO.md) |
-| Go and PostgreSQL | [Architecture](docs/ARCHITECTURE.md) |
+| Go and SQLite | [Architecture](docs/ARCHITECTURE.md) |
 | Configuring and syncing tools | [Connectors](docs/CONNECTORS.md) |
 | Sign-in, OIDC and QA | [Access](docs/ACCESS.md) |
 | Interface and sample walkthrough | [Design](docs/DESIGN.md) |
@@ -164,3 +164,16 @@ Custodia started as an internal tool (DS Hub) and is now open source under
 the [Apache 2.0](LICENSE) license. CyberArk, Netskope and the other product
 names are trademarks of their owners and identify the tools Custodia reads
 from; Custodia is not affiliated with them.
+
+## Go backend laboratory
+
+The first self-hosted installation targets single-instance SQLite on local disk.
+The [Go laboratory](server/README.md) implements synthetic people/coverage reads;
+real authentication, connectors and a distributable application remain pending.
+Run `npm run verify:go` for the backend checks.
+
+The explicit `serve` mode now verifies per-request Ozal identity assertions
+and supports host-side bootstrap of the first administrator.
+`npm run verify:go:gateway` checks signed entry, scoped access and logout with
+the real UI and a disposable gateway fixture. Acceptance against a deployed
+Ozal instance remains pending; see [access](docs/ACCESS.md).

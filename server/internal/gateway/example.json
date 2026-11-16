@@ -1,0 +1,6 @@
+{
+  "issuer": "https://login.acme.example",
+  "audience": "custodia",
+  "public_origin": "https://custodia.acme.example",
+  "public_key_files": ["ozal-public-key.pem"]
+}

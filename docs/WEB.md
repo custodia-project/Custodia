@@ -40,6 +40,21 @@ usando sólo `mock-api.ts`.
 La demo entra con una sesión de lectura («Demo»). Una ruta que la API
 simulada no conoce responde «No disponible en la demo».
 
+## Laboratorio Go contra el build real
+
+`npm run verify:go:web` compila el frontend con VITE_DEMO=0 en una carpeta
+temporal y un binario Go sin CGO. El servidor Go sirve la UI con --web-dir y
+responde las lecturas de Personas/cobertura desde SQLite. El navegador prueba
+los casos Acme sin interceptar respuestas y comprueba que hubo HTTP real.
+Las preferencias se conservan al reiniciar y se auditan en su transacción.
+
+Personas comparte runtime con CyberArk pero no carga el dashboard PAM. El
+laboratorio anuncia sólo las capacidades de lectura de Identity y Netskope.
+El harness inyecta una credencial sintética; no implementa ingreso interactivo,
+OIDC/Ozal. El gate ya prueba autorización de lectura por conexión con
+principales sintéticos, acceso de una sola fuente y revocación. Consultar
+[ejecución y límites](../server/README.md) y [paridad](PARITY.md).
+
 ## Idiomas
 
 La app está en español (fuente) e inglés con `web/src/cross/i18n/`: `t('texto
@@ -135,3 +150,13 @@ Reglas que siguen de ahí:
 `npm run verify:web` desde la raíz: tipos, lint, estilos, pruebas unitarias,
 build de la demo y e2e con Chromium. El sitio se construye con
 `npm run build:site`.
+
+## Entrada firmada de Ozal
+
+El build real acepta mode ozal en auth/status: identidad y rol vienen del
+backend, sin administración de contraseña local ni alta de usuarios legacy.
+El cierre de sesión envía primero POST /api/auth/logout y luego un formulario
+POST al path fijo /_/auth/logout del mismo origen para que Ozal reciba su cookie.
+No consume URLs de redirección arbitrarias. El gate verify:go:gateway prueba
+este recorrido con UI compilada, Go y gateway efímero que firma cada petición.
+La instancia real de Ozal sigue pendiente de aceptación; ver [acceso](ACCESS.md).

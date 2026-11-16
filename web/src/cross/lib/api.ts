@@ -87,6 +87,16 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 export async function logout(): Promise<boolean> {
   try {
     const response = await fetch(`${API_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+    if (response.ok && response.headers.get('Content-Type')?.includes('application/json')) {
+      const result = await response.json().catch(() => null) as { gateway_logout?: boolean } | null;
+      if (result?.gateway_logout === true) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/_/auth/logout';
+        document.body.appendChild(form);
+        form.submit();
+      }
+    }
     return response.ok;
   } catch {
     return false;

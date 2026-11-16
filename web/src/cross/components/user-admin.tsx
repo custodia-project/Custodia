@@ -15,7 +15,7 @@ import { RolePicker, formatPermissionCount } from './role-picker';
 import './user-admin.css';
 import { t } from '../i18n/index.ts';
 
-type Props = { onNotice: (message: string) => void; onError: (message: string) => void; currentActorId?: string; currentUserEmail?: string | null; authMode?: 'local' | 'oidc' | 'hybrid'; permissions: string[] };
+type Props = { onNotice: (message: string) => void; onError: (message: string) => void; currentActorId?: string; currentUserEmail?: string | null; authMode?: 'local' | 'oidc' | 'hybrid' | 'ozal'; permissions: string[] };
 
 const USER_PAGE_SIZE = 20;
 export function UserAdmin({ onNotice, onError, currentActorId, currentUserEmail, authMode, permissions: actorPermissions }: Props) {
@@ -156,7 +156,7 @@ export function UserAdmin({ onNotice, onError, currentActorId, currentUserEmail,
         <label className="search-box"><Search size={16} /><span className="sr-only">{t('Buscar usuarios')}</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} placeholder={t('Buscar por nombre o email')} /></label>
         {canReadRoles && <CompactSelect value={roleFilter} ariaLabel={t('Filtrar por rol')} options={[{ value: '', label: t('Todos los roles') }, ...roles.map((role) => ({ value: role.role_code, label: role.display_name }))]} onChange={(value) => { setRoleFilter(value); setPage(0); }} />}
         <CompactSelect value={statusFilter} ariaLabel={t('Filtrar por estado')} options={[{ value: '', label: t('Todos los estados') }, { value: 'active', label: t('Activo') }, { value: 'pending', label: t('Pendiente de primer acceso') }, { value: 'inactive', label: t('Desactivado') }]} onChange={(value) => { setStatusFilter(value); setPage(0); }} />
-        {authMode !== 'oidc' && canManageLocal && canAssignRoles && canReadRoles && <button className="button primary" type="button" disabled={!roleOptions.length} onClick={() => setCreateOpen(true)}><Plus size={15} /> {t('Crear usuario local')}</button>}
+        {authMode !== 'oidc' && authMode !== 'ozal' && canManageLocal && canAssignRoles && canReadRoles && <button className="button primary" type="button" disabled={!roleOptions.length} onClick={() => setCreateOpen(true)}><Plus size={15} /> {t('Crear usuario local')}</button>}
       </div>
       {catalogError && <p className="user-directory-error" role="status">{t('Catálogo de acceso no disponible: {catalogError}', { catalogError: catalogError })}</p>}
       {loading ? <StateBlock variant="loading" title={t('Cargando usuarios')} /> : loadError ? <StateBlock variant="error" title={t('No se pudieron cargar los usuarios')} hint={loadError} action={<button className="button subtle" type="button" onClick={() => void load()}>{t('Reintentar')}</button>} /> : <>

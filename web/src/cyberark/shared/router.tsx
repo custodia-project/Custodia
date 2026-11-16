@@ -102,7 +102,7 @@ export function CyberarkRouter({
   const { summary, catalogs, analytics, accountPlatformCoverage, accountManagementSummary, accountManagementSummaryLoading, accountManagementSummaryError, safes, safeTotal, safeClassificationCounts, loadError, loading, setSafes, loadDashboard } = useDashboard({
     authChecked, authStatus, search, includeAccounts, workflowFilter, classificationFilter, accountTypeFilter,
     inventoryScopeFilter, qualityFilter, scopeHintFilter, healthFilter, nextActionFilter, businessUnitFilter, responsibleFilter, page,
-    loadFiltered: workspaceView === 'safes', enabled: domainOf(workspaceView) === 'pam', refreshKey, includeInternal, onUnauthorized, onError,
+    loadFiltered: workspaceView === 'safes', enabled: workspaceView !== 'person' && hasAccess(workspaceView) && domainOf(workspaceView) === 'pam', refreshKey, includeInternal, onUnauthorized, onError,
   });
   const { detail, setDetail, form, setForm, saving, savingSafeNumber, savedSafeNumber, selectSafe, exportSafes, exportAccounts, quickUpdate, saveAssignment, bulkSaveAssignment, saveMetadata } = useSafeActions({
     catalogs, search, includeAccounts, workflowFilter, classificationFilter, accountTypeFilter, inventoryScopeFilter,
