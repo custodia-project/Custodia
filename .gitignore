@@ -11,6 +11,8 @@ node_modules/
 dist/
 bin/
 coverage/
+# Source package named coverage, not test output.
+!server/internal/coverage/
 playwright-report/
 test-results/
 artifacts/
