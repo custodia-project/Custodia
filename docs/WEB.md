@@ -202,6 +202,12 @@ El sitio publica su capa para buscadores y asistentes con archivos de
   `site/site/verification.mjs` o desde `GOOGLE_SITE_VERIFICATION` y
   `BING_SITE_VERIFICATION`. Son tokens públicos que aparecen en el HTML;
   nunca deben contener una clave de API ni un secreto.
+- Cloudflare Web Analytics se activa por proyecto de Pages. El CSP de
+  `site/` y `web/` permite el beacon de `static.cloudflareinsights.com` y el
+  envío a `cloudflareinsights.com`; sin eso el navegador bloquea la medición.
+  Web Analytics mide visitas y rutas, no eventos ni UTM: para clics de demo,
+  documentación o instalación hace falta otra herramienta o una convención de
+  rutas.
 
 Las páginas de contenido son `/inventory/`, `/connectors/`,
 `/connectors/cyberark-pam/`, `/connectors/wazuh/`, `/install/` y `/limits/`,
