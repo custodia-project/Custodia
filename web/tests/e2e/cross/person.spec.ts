@@ -592,6 +592,12 @@ test('HOME-WHEEL-002: the home wheel uses two concentric 2D circles', async ({ p
   await expect(ring).toHaveAttribute('aria-hidden', 'true');
   await expect(orbit).toHaveAttribute('aria-hidden', 'true');
 
+  // The circles and nodes enter with different delays. Measure their final
+  // geometry rather than comparing boxes from different animation frames.
+  await page.locator('.home-visibility').evaluate((element) =>
+    Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  );
+
   const ringBox = await ring.boundingBox();
   const orbitBox = await orbit.boundingBox();
   const center = await page.locator('.home-visibility-core').boundingBox();
