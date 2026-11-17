@@ -1,0 +1,7 @@
+/* Article prose: base.css resets list markers, and a page made of steps or
+   checks needs them. Kept separate from site.css so the site shell and the
+   article pages can evolve without coupling. */
+.article-body ul { list-style: disc; }
+.article-body ol { list-style: decimal; }
+.article-body li { padding-left: 4px; }
+.article-body li::marker { color: var(--ink-600); font-family: var(--font-data); }
