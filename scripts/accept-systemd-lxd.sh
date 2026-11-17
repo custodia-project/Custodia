@@ -3,7 +3,8 @@
 #
 # Builds two signed releases (N-1 and N) with a throwaway release key, then in
 # a fresh Ubuntu container: installs N-1 as root with systemd, re-runs the
-# installer (idempotency), signs in with the one-time password, changes it,
+# installer (idempotency), creates the first administrator in the browser
+# with the one-use setup code,
 # registers a connection with an encrypted secret, takes a console backup,
 # plants a link from the data directory to a root-owned canary, requests the
 # update from the console and lets custodia-update.path apply it, then tries a
@@ -54,7 +55,8 @@ INSTALL="sh /root/install/install.sh --yes --signature unused --allowed-signers 
 
 echo "1. install N-1 as root with systemd"
 in_c "$INSTALL --version 0.1.0 --package /srv/release/custodia-0.1.0-linux-amd64.tar.gz --sha256 $SHA1 > /root/install.log 2>&1" || fail "installer exited non-zero"
-in_c "sed -nE 's/.*one-time password: (\S+).*/\1/p' /root/install.log > /root/temp-pass; chmod 600 /root/temp-pass; test -s /root/temp-pass" || fail "no one-time password"
+in_c "sed -nE 's/.*Setup code: ([A-Z0-9-]+).*/\1/p' /root/install.log > /root/setup-code; chmod 600 /root/setup-code; test -s /root/setup-code" || fail "no setup code"
+in_c '! grep -qi "password:" /root/install.log' || fail "the installer printed a password"
 in_c 'systemctl is-active -q custodia.service custodia-update.path custodia-backup.timer' || fail "units not active"
 in_c 'curl -ks https://127.0.0.1:8443/api/health | grep -q "\"version\":\"0.1.0\""' || fail "health"
 in_c 'test "$(stat -c "%U:%G %a" /etc/custodia)" = "root:custodia 750"' || fail "/etc/custodia ownership"
@@ -66,19 +68,21 @@ in_c 'test "$(ps -o user= -C custodia | sort -u)" = "custodia"' || fail "service
 echo "2. re-run the installer (idempotent)"
 in_c 'md5sum /etc/custodia/master.key > /root/key.md5'
 in_c "$INSTALL --version 0.1.0 --package /srv/release/custodia-0.1.0-linux-amd64.tar.gz --sha256 $SHA1 > /root/reinstall.log 2>&1" || fail "re-install exited non-zero"
-in_c '! grep -q "one-time password" /root/reinstall.log && md5sum -c --quiet /root/key.md5' || fail "re-install changed the admin or the key"
+in_c 'md5sum -c --quiet /root/key.md5' || fail "re-install changed the master key"
+# Without an administrator yet, a re-install issues a new code that replaces the first.
+in_c "sed -nE 's/.*Setup code: ([A-Z0-9-]+).*/\1/p' /root/reinstall.log > /root/setup-code-2; test -s /root/setup-code-2 && ! cmp -s /root/setup-code /root/setup-code-2 && mv /root/setup-code-2 /root/setup-code" || fail "re-install did not replace the setup code"
 
-echo "3. console: sign in, change password, secret connection, backup, update"
+echo "3. console: first administrator by setup code, secret connection, backup, update"
 cat > "$WORK/flow.sh" <<FLOW
 set -eu
 O=$ORIGIN
 J=/root/jar
 c() { curl -ks -b \$J -c \$J "\$@"; }
 csrf() { c \$O/api/auth/status | sed -E 's/.*"csrf_token":"([^"]+)".*/\1/'; }
-P=\$(cat /root/temp-pass)
-c -H "Origin: \$O" -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"\$P\"}" \$O/api/auth/login | grep -q '"must_change_password":true'
-T=\$(csrf)
-c -H "Origin: \$O" -H "X-Custodia-CSRF: \$T" -H 'Content-Type: application/json' -d "{\"current_password\":\"\$P\",\"new_password\":\"Systemd acceptance passphrase 17\"}" \$O/api/auth/password | grep -q '"changed":true'
+CODE=\$(cat /root/setup-code)
+c -H "Origin: \$O" -H 'Content-Type: application/json' -d "{\"code\":\"\$CODE\",\"username\":\"admin\",\"display_name\":\"Acceptance Admin\",\"password\":\"Systemd acceptance passphrase 17\"}" \$O/api/auth/setup | grep -q '"authenticated":true'
+# The code works once.
+! curl -ks -H "Origin: \$O" -H 'Content-Type: application/json' -d "{\"code\":\"\$CODE\",\"username\":\"second\",\"display_name\":\"Second\",\"password\":\"Another acceptance passphrase\"}" \$O/api/auth/setup | grep -q '"authenticated":true'
 T=\$(csrf)
 c -H "Origin: \$O" -H "X-Custodia-CSRF: \$T" -H 'Content-Type: application/json' -d '{"connector":"cyberark-pam-safes-v1","base_url":"https://pam.acme.example","collections":["safes"],"scope":"accept","auth_mode":"bearer","secret":"accept-secret-value"}' \$O/api/ingestion/connections | grep -q '"group_id"'
 ! grep -q accept-secret-value /var/lib/custodia/state.db
@@ -131,4 +135,4 @@ in_c 'for u in custodia.service custodia-update.path custodia-backup.timer; do !
 in_c 'test -f /var/lib/custodia/state.db && test -f /etc/custodia/master.key' || fail "uninstall removed data"
 in_c "sh /root/install/install.sh --uninstall --purge >/dev/null && test ! -e /var/lib/custodia && test ! -e /etc/custodia" || fail "purge"
 
-echo "Systemd acceptance OK: install, idempotent re-install, one-time admin, console secret/backup/update, link-safe root updater, forged update rejected, backup timer, uninstall and purge."
+echo "Systemd acceptance OK: install, idempotent re-install, first administrator by one-use setup code, console secret/backup/update, link-safe root updater, forged update rejected, backup timer, uninstall and purge."

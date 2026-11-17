@@ -1,7 +1,8 @@
 // Local login end to end in Chromium against the real Go server and SQLite.
-// Creates the first administrator through the CLI with the password on stdin,
-// then exercises login, the generic error, the temporary password, account
-// creation and disabling (which revokes the reader's live session).
+// Creates the first administrator in the browser with the one-use setup code
+// the host prints, then exercises login, the generic error, the temporary
+// password, account creation and disabling (which revokes the reader's live
+// session).
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -31,8 +32,10 @@ try {
   execFileSync('npm', ['--prefix', 'web', 'run', 'build', '--', '--outDir', webBuild], { cwd: root, env: { ...process.env, VITE_DEMO: '0' }, stdio: 'inherit' });
   execFileSync('go', ['build', '-o', binary, './cmd/custodia'], { cwd: join(root, 'server'), env: { ...process.env, CGO_ENABLED: '0' }, stdio: 'inherit' });
   execFileSync(binary, ['init', '--dir', data], { stdio: 'pipe' });
-  // The password is piped on stdin: never an argument and never a file here.
-  execFileSync(binary, ['create-admin', '--dir', data, '--username', 'ada.admin', '--display-name', 'Ada Admin'], { input: `${adminPassword}\n`, stdio: ['pipe', 'pipe', 'pipe'] });
+  // The host prints a one-use setup code; no password is printed or piped.
+  const issued = execFileSync(binary, ['setup-code', '--dir', data], { encoding: 'utf8' });
+  const setupCode = issued.match(/Setup code: (\S+)/)?.[1];
+  if (!setupCode) throw new Error(`setup-code printed no code: ${issued}`);
 
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
@@ -50,14 +53,34 @@ try {
   admin.on('pageerror', (error) => console.error('PAGEERROR', error.message));
   admin.on('console', (message) => { if (message.type() === 'error') console.error('CONSOLE', message.text().slice(0, 500)); });
   await admin.goto(origin + '/');
-  await expect(admin.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  // First run: the browser setup with the code from the host.
+  await expect(admin.getByRole('heading', { name: 'Configurá Custodia' })).toBeVisible();
+  await admin.getByRole('button', { name: 'Empezar' }).click();
+  await admin.getByLabel('Código de configuración').fill('ZZZZ-ZZZZ');
+  await admin.getByLabel('Nombre', { exact: true }).fill('Ada Admin');
   await admin.getByRole('textbox', { name: 'Usuario', exact: true }).fill('ada.admin');
-  await admin.locator('input[type="password"]').fill('not the password');
-  await admin.getByRole('button', { name: 'Iniciar sesión' }).click();
-  await expect(admin.locator('.auth-error')).toHaveText('Usuario o contraseña incorrectos.');
-  await admin.locator('input[type="password"]').fill(adminPassword);
-  await admin.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await admin.getByRole('button', { name: 'Continuar' }).click();
+  await admin.locator('input[autocomplete="new-password"]').nth(0).fill(adminPassword);
+  await admin.locator('input[autocomplete="new-password"]').nth(1).fill(adminPassword);
+  await admin.getByRole('button', { name: 'Crear administrador' }).click();
+  await expect(admin.locator('.auth-error')).toContainText('El código no es válido o venció');
+  await admin.getByRole('button', { name: 'Volver' }).click();
+  await admin.getByLabel('Código de configuración').fill(setupCode.toLowerCase());
+  await admin.getByRole('button', { name: 'Continuar' }).click();
+  await admin.getByRole('button', { name: 'Crear administrador' }).click();
   await expect(admin.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible();
+  // The setup path is closed now; a fresh visitor gets the normal login.
+  const visitor = await (await browser.newContext({ locale: 'es-AR' })).newPage();
+  await visitor.goto(origin + '/');
+  await expect(visitor.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
+  await visitor.getByRole('textbox', { name: 'Usuario', exact: true }).fill('ada.admin');
+  await visitor.locator('input[type="password"]').fill('not the password');
+  await visitor.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(visitor.locator('.auth-error')).toHaveText('Usuario o contraseña incorrectos.');
+  await visitor.locator('input[type="password"]').fill(adminPassword);
+  await visitor.getByRole('button', { name: 'Iniciar sesión' }).click();
+  await expect(visitor.getByRole('button', { name: 'Abrir menú de usuario' })).toBeVisible();
+  await visitor.close();
   await admin.goto(origin + '/admin/access');
   await expect(admin.getByRole('heading', { name: 'Acceso a la plataforma' })).toBeVisible();
   await expect(admin.getByRole('row', { name: /ada\.admin/ })).toBeVisible();
@@ -92,7 +115,7 @@ try {
   await reader.reload();
   await expect(reader.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
 
-  console.log('Local mode + Go + SQLite + real web: CLI admin on stdin, generic login error, session cookie, temporary password change, account creation and disabling with session revocation OK.');
+  console.log('Local mode + Go + SQLite + real web: first administrator by browser setup code (wrong code refused, then closed), generic login error, session cookie, temporary password change, account creation and disabling with session revocation OK.');
 } finally {
   if (server && server.exitCode === null && server.signalCode === null) {
     const exited = new Promise((done) => server.once('exit', done));

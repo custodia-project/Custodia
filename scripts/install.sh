@@ -297,17 +297,9 @@ if [ ! -f "$CONFIG_DIR/master.key" ] && [ -f "$DATA_DIR/master.key" ]; then
   mv "$DATA_DIR/master.key" "$CONFIG_DIR/master.key"
 fi
 chmod 0600 "$CONFIG_DIR/master.key" 2>/dev/null || true
-first_admin=0
-if [ ! -f "$DATA_DIR/.admin-created" ]; then
-  password=$(openssl rand -base64 24 | tr -d '\n')
-  if printf '%s\n' "$password" | "$PREFIX/bin/custodia" create-admin --dir "$DATA_DIR" --username admin --display-name "Custodia Admin" --connections "${CUSTODIA_ADMIN_CONNECTIONS:-}" --must-change >/dev/null 2>&1; then
-    touch "$DATA_DIR/.admin-created"
-    chmod 0600 "$DATA_DIR/.admin-created"
-    first_admin=1
-  else
-    password=
-  fi
-fi
+# The first administrator is created in the browser with a one-use setup
+# code (see docs/ACCESS.md); no password is ever printed. The code is issued
+# at the end, once the database belongs to the service user.
 
 if [ "$NO_SYSTEMD" = 0 ]; then
   cat > /etc/systemd/system/custodia.service <<UNIT
@@ -398,15 +390,33 @@ UNIT
   [ "$code" = 200 ] || die "service started but health returned $code"
 fi
 
+# Issue the setup code as the service user, so SQLite never leaves root-owned
+# files in the data directory. An existing administrator means no code.
+setup_line=
+if [ "$NO_SYSTEMD" = 0 ]; then
+  setup_out=$(runuser -u "$SERVICE_USER" -- "$PREFIX/bin/custodia" setup-code --dir "$DATA_DIR" 2>&1) || true
+else
+  setup_out=$("$PREFIX/bin/custodia" setup-code --dir "$DATA_DIR" 2>&1) || true
+fi
+case "$setup_out" in
+  "Setup code: "*) setup_line=$setup_out ;;
+  *"already exists"*) ;;
+  *) say "Warning: could not issue a setup code: $setup_out" ;;
+esac
+setup_cmd="$PREFIX/bin/custodia setup-code --dir $DATA_DIR"
+[ "$NO_SYSTEMD" = 1 ] || setup_cmd="sudo -u $SERVICE_USER $setup_cmd"
+
 say "Custodia $VERSION installed."
 say "  binary: $PREFIX/bin/custodia"
 say "  data:   $DATA_DIR"
 say "  config: $CONFIG_DIR"
 say "  URL:    $PUBLIC_ORIGIN"
-if [ "$first_admin" = 1 ]; then
-  say "  first administrator: admin"
-  say "  one-time password: $password"
-  say "  Change it at the first sign-in. It is not logged; this is the only print."
+if [ -n "$setup_line" ]; then
+  say ""
+  say "Finish in your browser: open $PUBLIC_ORIGIN and create the first"
+  say "administrator with this code. It works once and is not stored in clear."
+  say "  $setup_line"
+  say "Need another code? $setup_cmd"
 fi
 if [ "$NO_SYSTEMD" = 1 ]; then
   say "Run: $PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key${UPDATE_MANIFEST:+ --update-manifest $UPDATE_MANIFEST}"

@@ -130,7 +130,7 @@ var releasePublicKey = ""
 
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: custodia version|init|migrate|bootstrap-admin|create-admin|reset-password|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
+		return fmt.Errorf("usage: custodia version|init|migrate|bootstrap-admin|create-admin|reset-password|setup-code|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "private Custodia data directory")
@@ -439,6 +439,29 @@ func run() error {
 		}
 		defer s.DB.Close()
 		return s.Migrate(context.Background())
+	case "setup-code":
+		// The first administrator is created in the browser with this one-use
+		// code; the code is printed here only and stored as a hash.
+		s, err := openInstallation(*dir)
+		if err != nil {
+			return err
+		}
+		defer s.DB.Close()
+		code, err := localauth.NewSetupCode()
+		if err != nil {
+			return err
+		}
+		normalized, _ := localauth.NormalizeSetupCode(code)
+		now := time.Now()
+		expires := now.Add(localauth.SetupCodeLifetime)
+		if err = s.IssueSetupCode(context.Background(), localauth.SetupCodeHash(normalized), now, expires); err != nil {
+			if errors.Is(err, lab.ErrLocalBootstrap) {
+				return fmt.Errorf("the first administrator already exists; use reset-password to recover an account")
+			}
+			return err
+		}
+		fmt.Printf("Setup code: %s (valid until %s UTC, %d minutes; a new code replaces this one)\n", code, expires.UTC().Format("15:04"), int(localauth.SetupCodeLifetime/time.Minute))
+		return nil
 	case "create-admin", "reset-password":
 		if *gatewayConfig != "" || *authMode != "" {
 			return fmt.Errorf("local account commands do not take --gateway-config or --auth-mode")

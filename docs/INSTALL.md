@@ -8,8 +8,11 @@ revisado: 2026-11-17
 
 Custodia se instala en Linux x86_64/arm64 con systemd. Docker queda para
 después. La instalación es explícita: no hay usuario, contraseña ni token por
-defecto, y el primer administrador se crea una sola vez con una contraseña
-temporal impresa por el instalador y cambio obligatorio.
+defecto. El instalador no imprime contraseñas: al terminar muestra un
+**código de configuración** de un solo uso (15 minutos) y la persona crea el
+primer administrador en el navegador, eligiendo su contraseña. Otro código:
+`sudo -u custodia custodia setup-code --dir /var/lib/custodia`. Contrato en
+[ACCESS.md](ACCESS.md#primer-administrador-con-código-de-configuración-1711).
 
 ## Comando
 
@@ -108,7 +111,6 @@ volver atrás.
 | `/usr/local/lib/custodia/web` | Frontend compilado. |
 | `/usr/local/lib/custodia/allowed_signers` | Clave pública de release fijada (root, 0644); única clave que acepta el actualizador. |
 | `/var/lib/custodia/state.db` | SQLite; autoridad de la instancia. |
-| `/var/lib/custodia/.admin-created` | Marcador de bootstrap; no se reutiliza. |
 | `/etc/custodia/` | Propiedad de root, grupo `custodia`, 0750: el servicio lee pero no reemplaza su configuración. |
 | `/etc/custodia/master.key` | Clave maestra 0600 del usuario `custodia`, fuera de la base y del backup. |
 | `/etc/custodia/tls/server.crt`, `server.key` | Certificado y clave TLS. |
@@ -151,5 +153,5 @@ el watcher de actualización, el timer de backup y el binario; conserva datos y 
 `/var/lib/custodia` y `/etc/custodia`. `npm run accept:systemd` acepta instalación, actualización, consola,
 desinstalación y purga con systemd real en un contenedor LXD descartable; el gate
 `npm run verify:go:install` prueba el paquete firmado, la instalación local sin
-systemd, TLS, salud, contraseña temporal, rechazo de firma inválida y
-desinstalación.
+systemd, TLS, salud, primer administrador con el código de configuración
+(un solo uso), rechazo de firma inválida y desinstalación.

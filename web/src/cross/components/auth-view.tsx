@@ -138,7 +138,7 @@ export function AuthView({ auth, error }: AuthViewProps) {
     authStatus, authChecked, loginEmail, setLoginEmail, loginPassword, setLoginPassword, loginBusy,
     passwordChangeBusy, currentPassword, setCurrentPassword, newPassword, setNewPassword,
     newPasswordConfirm, setNewPasswordConfirm, showRegistration, setShowRegistration, registerName,
-    setRegisterName, registerPasswordConfirm, setRegisterPasswordConfirm, registerBusy, setupStep,
+    setRegisterName, setupCode, setSetupCode, registerPasswordConfirm, setRegisterPasswordConfirm, registerBusy, setupStep,
     setSetupStep, authMessage, authError, authErrorDetails, retryAuth, submitRegistration, submitLogin, submitPasswordChange,
   } = auth;
   if (!authChecked) return <AuthShell state role="status"><AuthHeader title={t('Comprobando tu acceso')} detail="Verificando la sesión antes de cargar Custodia." /></AuthShell>;
@@ -153,7 +153,7 @@ export function AuthView({ auth, error }: AuthViewProps) {
     const setupAvailable = (authStatus.mode === 'local' || authStatus.mode === 'hybrid') && authStatus.setup_available;
     const checks = passwordChecks(loginPassword);
     const passwordScore = checks.filter((check) => check.valid).length;
-    const canContinue = loginEmail.trim().length > 0 && registerName.trim().length > 0;
+    const canContinue = setupCode.trim().length > 0 && loginEmail.trim().length > 0 && registerName.trim().length > 0;
     const canCreate = passwordScore === checks.length && loginPassword === registerPasswordConfirm;
     const localLoginAvailable = authStatus.mode === 'local' || authStatus.mode === 'hybrid' || authStatus.mode === 'oidc';
     const usernameLogin = authStatus.mode === 'local' || authStatus.mode === 'oidc';
@@ -172,16 +172,16 @@ export function AuthView({ auth, error }: AuthViewProps) {
     };
     const header = setupAvailable
       ? !showRegistration
-        ? <AuthHeader title={t('Creá la cuenta inicial')} detail="Vas a usarla para ingresar y administrar Custodia." />
-        : <AuthHeader eyebrow={`PASO ${setupStep} DE 2`} title={setupStep === 1 ? t('Tus datos') : t('Elegí una contraseña')} />
+        ? <AuthHeader title={t('Configurá Custodia')} detail={t('Creá el primer administrador con el código que mostró el instalador en el servidor.')} />
+        : <AuthHeader eyebrow={`PASO ${setupStep} DE 2`} title={setupStep === 1 ? t('Código y tus datos') : t('Elegí una contraseña')} />
       : <AuthHeader title={t('Iniciar sesión')} detail={authStatus.mode === 'oidc' ? t('Ingresá con el proveedor de identidad de tu organización') : 'Portal de métricas y relaciones entre herramientas de seguridad'} />;
 
     return <AuthShell>
       {header}
       <AuthNotices message={authMessage} error={error || queryError} />
-      {setupAvailable && !showRegistration ? <button className="button primary auth-submit" type="button" onClick={() => setShowRegistration(true)}>{t('Crear cuenta')}</button> : null}
+      {setupAvailable && !showRegistration ? <><button className="button primary auth-submit" type="button" onClick={() => setShowRegistration(true)}>{t('Empezar')}</button><p className="auth-provider-hint">{t('¿No tenés el código o venció? En el servidor: sudo -u custodia custodia setup-code --dir /var/lib/custodia')}</p></> : null}
       {setupAvailable && showRegistration && <form className="auth-form" noValidate onSubmit={(event) => { event.preventDefault(); if (setupStep === 1) { if (canContinue) setSetupStep(2); return; } void submitRegistration(event); }}>
-        {setupStep === 1 ? <><label>{t('Nombre')}<input value={registerName} onChange={(event) => setRegisterName(event.target.value)} autoComplete="name" placeholder={t('Cómo te llamamos')} required /></label><label>{t('Email')}<input type="email" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="tu@email.com" required /></label><button className="button primary auth-submit" type="submit" disabled={!canContinue}>{t('Continuar')}</button></> : <><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="new-password" placeholder={t('Creá una contraseña')} autoFocus /><div className="password-strength"><div className="password-strength-bar"><span style={{ width: passwordScore * 20 + '%' }} /></div><small>{passwordScore < 3 ? t('Todavía es débil') : passwordScore < 5 ? t('Casi lista') : t('Contraseña segura')}</small></div><div className="password-checks">{checks.map((check) => <span className={check.valid ? 'valid' : ''} key={check.label}>{check.valid ? '✓' : '○'} {check.label}</span>)}</div></label><label>{t('Confirmar contraseña')}<PasswordInput value={registerPasswordConfirm} onChange={setRegisterPasswordConfirm} autoComplete="new-password" placeholder={t('Repetí tu contraseña')} /></label><button className="button primary auth-submit" type="submit" disabled={registerBusy || !canCreate}>{registerBusy ? t('Creando cuenta...') : t('Crear cuenta')}</button><button className="auth-link" type="button" onClick={() => setSetupStep(1)}>{t('Volver')}</button></>}
+        {setupStep === 1 ? <><label>{t('Código de configuración')}<input value={setupCode} onChange={(event) => setSetupCode(event.target.value.toUpperCase())} autoComplete="one-time-code" inputMode="text" autoCapitalize="characters" spellCheck={false} placeholder="XXXX-XXXX" maxLength={12} autoFocus required /></label><label>{t('Nombre')}<input value={registerName} onChange={(event) => setRegisterName(event.target.value)} autoComplete="name" placeholder={t('Cómo te llamamos')} required /></label><label>{t('Usuario')}<input type="text" autoComplete="username" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="ada.admin" required /></label><button key="setup-continue" className="button primary auth-submit" type="submit" disabled={!canContinue}>{t('Continuar')}</button></> : <><label>{t('Contraseña')}<PasswordInput value={loginPassword} onChange={setLoginPassword} autoComplete="new-password" placeholder={t('Creá una contraseña')} autoFocus /><div className="password-strength"><div className="password-strength-bar"><span style={{ width: passwordScore * 20 + '%' }} /></div><small>{passwordScore < 3 ? t('Todavía es débil') : passwordScore < 5 ? t('Casi lista') : t('Contraseña segura')}</small></div><div className="password-checks">{checks.map((check) => <span className={check.valid ? 'valid' : ''} key={check.label}>{check.valid ? '✓' : '○'} {check.label}</span>)}</div></label><label>{t('Confirmar contraseña')}<PasswordInput value={registerPasswordConfirm} onChange={setRegisterPasswordConfirm} autoComplete="new-password" placeholder={t('Repetí tu contraseña')} /></label><button className="button primary auth-submit" type="submit" disabled={registerBusy || !canCreate}>{registerBusy ? t('Creando cuenta...') : t('Crear administrador')}</button><button key="setup-back" className="auth-link" type="button" onClick={(event) => { event.preventDefault(); setSetupStep(1); }}>{t('Volver')}</button></>}
       </form>}
       {!setupAvailable && <>
         {authStatus.mode === 'oidc' ? <div className="auth-form-stage">

@@ -68,7 +68,7 @@ try {
 
   const installed = await oneLiner(prefixArgs('ok'));
   if (installed.status !== 0 || !installed.stdout) throw new Error(`one-liner failed (status ${installed.status}): ${installed.stderr}`);
-  for (const expected of [`Custodia ${version} for linux/${arch} (signed catalog verified).`, `Custodia ${version} installed.`, 'Console address: https://', `--update-manifest ${base}/releases/stable/linux-${arch}.json`, 'one-time password:']) {
+  for (const expected of [`Custodia ${version} for linux/${arch} (signed catalog verified).`, `Custodia ${version} installed.`, 'Console address: https://', `--update-manifest ${base}/releases/stable/linux-${arch}.json`, 'Setup code: ']) {
     if (!installed.stdout.includes(expected)) throw new Error(`one-liner output lacks "${expected}": ${installed.stdout}`);
   }
   const binaryVersion = execFileSync(join(temporary, 'ok', 'p', 'bin', 'custodia'), ['version'], { encoding: 'utf8' }).trim();

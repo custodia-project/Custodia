@@ -340,6 +340,51 @@ temporal, revoca sesiones, limpia el bloqueo del usuario y audita con actor
 línea de F (archivo regular, no legible por grupo ni otros) o de la entrada
 estándar; nunca de un argumento.
 
+### Primer administrador con código de configuración (17/11)
+
+Una instalación nueva no imprime contraseñas. Mientras no exista el primer
+administrador local, el host emite un **código de configuración** y la persona
+crea su cuenta en el navegador eligiendo su propia contraseña. Modelo tomado
+del alta por código de Ozal, sin su seguimiento en vivo desde la terminal.
+
+- **Emisión, sólo en el host.** `custodia setup-code --dir D` (lo ejecuta el
+  instalador al terminar) genera un código de 8 símbolos del alfabeto
+  `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (sin `I`, `O`, `0` ni `1`; 40 bits) y lo
+  imprime una vez como `XXXX-XXXX`. Se guarda sólo su SHA-256, con emisión y
+  vencimiento a los 15 minutos. Emitir un código nuevo invalida los anteriores
+  (como mucho uno vigente). Se rechaza si ya existe el primer administrador.
+  Nunca se escribe en logs ni en respuestas; la auditoría registra la emisión
+  sin el código.
+- **Estado.** `GET /api/auth/status` sin sesión informa `setup_available: true`
+  sólo en modo `local`, mientras no hay administrador y hay un código vigente.
+  No revela nada más.
+- **Canje.** `POST /api/auth/setup` con `{code, username, display_name,
+  password}`, con el mismo control de `Origin` que el login. Acepta el código
+  con o sin guion y en minúsculas. En una sola transacción comprueba que no
+  exista el primer administrador, que el código coincida con el vigente y no
+  esté vencido ni usado, crea la cuenta como administrador con el marcador de
+  bootstrap (sin cambio obligatorio: la contraseña la eligió la persona y nunca
+  se imprimió), marca el código como usado y audita `setup_admin_created`.
+  Luego inicia la sesión como un login normal. La contraseña cumple la misma
+  política que el resto de las cuentas.
+- **Intentos.** Un código equivocado no destruye el vigente (nadie arruina la
+  instalación de otro adivinando). Se limitan los fallos por IP (5 cada 15
+  minutos, con bloqueo de 15) y en total (30 cada 15 minutos, que pausan todos
+  los canjes durante 5 minutos, menos que la vigencia del código, para que su
+  dueño todavía pueda usarlo). Emitir un código nuevo desde el host limpia los
+  contadores: quien adivina desde afuera no puede impedir la configuración.
+  Con 40 bits y esos límites, la probabilidad de acertar por fuerza bruta
+  dentro de la vigencia es despreciable. Las respuestas no distinguen código inexistente,
+  vencido o usado.
+- **Cierre.** Con el primer administrador creado, `setup-code` y el canje se
+  rechazan y `setup_available` es falso. `create-admin` sigue disponible para
+  automatización y `reset-password` para recuperación, ambos en el host.
+
+El primero en escribir un código válido crea la cuenta: no hay un segundo
+factor en el host. Lo acotan la vigencia corta, los límites y que el código
+sólo aparece en la terminal del instalador. Fuera del MVP: ver en la terminal
+qué navegador usó el código y el botón «no fui yo».
+
 Validación: pruebas Go con login correcto e incorrecto, mensaje idéntico para
 usuario inexistente, cuenta deshabilitada, sesión revocada, expiración
 absoluta e inactividad, Origin y CSRF ausentes, límite de intentos, contraseña

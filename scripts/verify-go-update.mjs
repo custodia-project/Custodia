@@ -70,14 +70,14 @@ try {
   const port = await freePort();
   const origin = `https://127.0.0.1:${port}`;
   const installed = run('sh', [join(root, 'scripts/install.sh'), '--no-systemd', '--version', oldVersion, '--package', oldPackage.archive, '--sha256', oldPackage.sha, '--signature', oldPackage.signature, '--allowed-signers', allowed, '--prefix', prefix, '--data-dir', data, '--config-dir', config, '--public-origin', origin, '--listen', `127.0.0.1:${port}`]);
-  const temporaryPassword = installed.match(/one-time password: (\S+)/)?.[1];
-  if (!temporaryPassword) throw new Error('installer did not print a temporary password');
+  const setupCode = installed.match(/Setup code: (\S+)/)?.[1];
+  if (!setupCode) throw new Error(`installer did not print a setup code: ${installed}`);
   await start(origin);
   const jar = join(temporary, 'cookies');
-  const login = curl(['-c', jar, '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ username: 'admin', password: temporaryPassword }), `${origin}/api/auth/login`]);
-  if (!login.includes('"must_change_password":true')) throw new Error('temporary password did not require a change');
+  // The first administrator is created in the browser with the setup code.
+  const created = curl(['-c', jar, '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ code: setupCode, username: 'admin', display_name: 'Update Admin', password: admin }), `${origin}/api/auth/setup`]);
+  if (!created.includes('"authenticated":true')) throw new Error(`setup code did not create the administrator: ${created}`);
   let status = JSON.parse(curl(['-b', jar, '-c', jar, `${origin}/api/auth/status`]));
-  curl(['-b', jar, '-c', jar, '-H', `Origin: ${origin}`, '-H', `X-Custodia-CSRF: ${status.csrf_token}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ current_password: temporaryPassword, new_password: admin }), `${origin}/api/auth/password`]);
   status = JSON.parse(curl(['-b', jar, '-c', jar, `${origin}/api/auth/status`]));
   const connection = curl(['-b', jar, '-c', jar, '-H', `Origin: ${origin}`, '-H', `X-Custodia-CSRF: ${status.csrf_token}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ connector: 'cyberark-pam-safes-v1', base_url: 'https://pam.acme.example', collections: ['safes'], scope: 'update-data', auth_mode: 'bearer', secret: 'update-gate-secret' }), `${origin}/api/ingestion/connections`]);
   const group = JSON.parse(connection).group_id;

@@ -208,6 +208,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if r.URL.Path == "/api/auth/setup" {
+		if r.Method != "POST" {
+			detail(w, 405, "Usá POST para la configuración inicial.")
+			return
+		}
+		h.setup(w, r, current)
+		return
+	}
 	if r.URL.Path == "/api/auth/login" {
 		if r.Method != "POST" {
 			detail(w, 405, "Usá POST para iniciar sesión.")
@@ -231,7 +239,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.expireCookie(w)
 		}
 		if r.URL.Path == "/api/auth/status" && r.Method == "GET" {
-			body := map[string]any{"mode": h.config.mode(), "authenticated": false, "setup_available": false, "permissions": []string{}, "api_docs_enabled": false, "user": nil}
+			setupAvailable := false
+			if h.config.mode() == "local" {
+				available, err := h.store.SetupAvailable(r.Context(), current)
+				if err != nil {
+					detail(w, 503, "No se pudo verificar la configuración inicial.")
+					return
+				}
+				setupAvailable = available
+			}
+			body := map[string]any{"mode": h.config.mode(), "authenticated": false, "setup_available": setupAvailable, "permissions": []string{}, "api_docs_enabled": false, "user": nil}
 			if h.oidcMode() {
 				body["oidc"] = h.oidcStatus(r.Context())
 			}

@@ -54,8 +54,9 @@ try {
     '--public-origin', origin, '--listen', `127.0.0.1:${port}`,
   ];
   const installed = run('sh', [join(root, 'scripts/install.sh'), ...installArgs]);
-  const password = installed.match(/one-time password: (\S+)/)?.[1];
-  if (!password) throw new Error(`installer did not print a one-time password: ${installed}`);
+  const setupCode = installed.match(/Setup code: (\S+)/)?.[1];
+  if (!setupCode) throw new Error(`installer did not print a setup code: ${installed}`);
+  if (/password: /i.test(installed)) throw new Error('installer printed a password');
   if (!installed.includes(`Custodia ${version} installed.`)) throw new Error('installer did not report success');
   const versionOutput = run(join(prefix, 'bin', 'custodia'), ['version']).trim();
   if (versionOutput !== version) throw new Error(`version = ${versionOutput}`);
@@ -109,8 +110,12 @@ try {
     await new Promise((done) => setTimeout(done, 250));
   }
   if (healthCode !== '200') throw new Error(`health returned ${healthCode}`);
-  const login = run('curl', ['-ks', '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ username: 'admin', password }), `${origin}/api/auth/login`]);
-  if (!login.includes('"must_change_password":true')) throw new Error(`one-time password did not require a change: ${login}`);
+  const firstAdmin = run('curl', ['-ks', '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ code: setupCode.toLowerCase(), username: 'first.admin', display_name: 'First Admin', password: 'installer gate first admin passphrase' }), `${origin}/api/auth/setup`]);
+  if (!firstAdmin.includes('"authenticated":true')) throw new Error(`setup code did not create the first administrator: ${firstAdmin}`);
+  const reused = run('curl', ['-ks', '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ code: setupCode, username: 'second.admin', display_name: 'Second', password: 'installer gate second admin passphrase' }), `${origin}/api/auth/setup`]);
+  if (reused.includes('"authenticated":true')) throw new Error('the setup code worked twice');
+  const login = run('curl', ['-ks', '-H', `Origin: ${origin}`, '-H', 'Content-Type: application/json', '-d', JSON.stringify({ username: 'first.admin', password: 'installer gate first admin passphrase' }), `${origin}/api/auth/login`]);
+  if (!login.includes('"authenticated":true')) throw new Error(`the chosen password does not sign in: ${login}`);
   try { process.kill(-server.pid, 'SIGTERM'); } catch {}
   const uninstalled = run('sh', [join(root, 'scripts/install.sh'), '--no-systemd', '--prefix', prefix, '--data-dir', data, '--config-dir', config, '--uninstall']);
   if (!uninstalled.includes('preserved')) throw new Error('uninstall did not preserve data');
@@ -135,7 +140,7 @@ try {
   const unattended = run('sh', ['-c', `cat ${quote(join(root, 'scripts/install.sh'))} | sh -s -- ${[...without(installArgs, ['--prefix', '--data-dir', '--config-dir']), '--prefix', join(temporary, 'yes', 'p'), '--data-dir', join(temporary, 'yes', 'd'), '--config-dir', join(temporary, 'yes', 'c'), '--yes'].map(quote).join(' ')}`]);
   if (!unattended.includes('installed.')) throw new Error('--yes install failed');
 
-  console.log(`Installer: signed local release, local install, TLS health, one-time admin, wrong-key, tampered-binary and unlisted-file rejection, interactive questions (cancel, custom address), --yes and uninstall OK (version ${version}).`);
+  console.log(`Installer: signed local release, local install, TLS health, first administrator by one-use setup code, wrong-key, tampered-binary and unlisted-file rejection, interactive questions (cancel, custom address), --yes and uninstall OK (version ${version}).`);
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

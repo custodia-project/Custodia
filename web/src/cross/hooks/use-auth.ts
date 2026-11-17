@@ -30,6 +30,7 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
   const [newPasswordConfirm, setNewPasswordConfirm] = useState('');
   const [showRegistration, setShowRegistration] = useState(false);
   const [registerName, setRegisterName] = useState('');
+  const [setupCode, setSetupCode] = useState('');
   const [registerPasswordConfirm, setRegisterPasswordConfirm] = useState('');
   const [registerBusy, setRegisterBusy] = useState(false);
   const [setupStep, setSetupStep] = useState<1 | 2>(1);
@@ -88,8 +89,8 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
 
   const submitRegistration = async (event: FormEvent) => {
     event.preventDefault();
-    if (!registerName.trim() || !loginEmail.trim()) {
-      onError(t('Completá tu nombre y tu email.'));
+    if (!setupCode.trim() || !registerName.trim() || !loginEmail.trim()) {
+      onError(t('Completá el código, tu nombre y tu usuario.'));
       return;
     }
     if (!loginPassword) {
@@ -103,13 +104,18 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     setRegisterBusy(true);
     onError('');
     try {
-      await api('/auth/register', { method: 'POST', body: JSON.stringify({ email: loginEmail, password: loginPassword, display_name: registerName }) });
+      // The one-use setup code printed by the installer creates the first
+      // administrator with the password chosen here, and signs in.
+      const created = await api<{ csrf_token?: string }>('/auth/setup', { method: 'POST', body: JSON.stringify({ code: setupCode.trim(), username: loginEmail.trim(), display_name: registerName.trim(), password: loginPassword }) });
+      setCSRFToken(created.csrf_token);
       setLoginPassword('');
       setRegisterPasswordConfirm('');
+      setSetupCode('');
       setShowRegistration(false);
       setSetupStep(1);
-      setAuthMessage(t('Cuenta creada. Ahora iniciá sesión para continuar.'));
-      setAuthStatus(await api<AuthStatus>('/auth/status'));
+      const status = await api<AuthStatus>('/auth/status');
+      setCSRFToken(status.csrf_token);
+      setAuthStatus(status);
     } catch (error) {
       onError(error instanceof Error ? error.message : t('No se pudo crear la cuenta'));
     } finally {
@@ -191,7 +197,7 @@ export function useAuth({ onError, onNotice, onSessionExpired }: UseAuthOptions)
     loginEmail, setLoginEmail, loginPassword, setLoginPassword, loginBusy,
     passwordChangeBusy, currentPassword, setCurrentPassword, newPassword, setNewPassword,
     newPasswordConfirm, setNewPasswordConfirm, showRegistration, setShowRegistration,
-    registerName, setRegisterName, registerPasswordConfirm, setRegisterPasswordConfirm,
+    registerName, setRegisterName, setupCode, setSetupCode, registerPasswordConfirm, setRegisterPasswordConfirm,
     registerBusy, setupStep, setSetupStep, authMessage, submitRegistration, submitLogin,
     submitPasswordChange,
   };

@@ -141,6 +141,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = migrateWazuhAuth(ctx, tx); err != nil {
 		return err
 	}
+	if err = migrateSetupCodes(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
