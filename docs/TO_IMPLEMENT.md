@@ -70,7 +70,7 @@ cambien acá):**
   puertos privilegiados; 443 sólo con `CAP_NET_BIND_SERVICE` explícita.
   **ACME queda fuera del MVP** (abierta; recomendación: diferirlo). El modo
   `ozal` conserva el gateway delante y su contrato de aserción no cambia.
-- **Releases y firma:** GitHub Releases en `octaviosantacruz/Custodia` con
+- **Releases y firma:** GitHub Releases en `custodia-project/Custodia` con
   manifiesto de versión, artefactos, SHA-256 y firma verificable. **minisign**
   (abierta; recomendación: minisign en lugar de cosign para un binario
   autohospedado); clave pública embebida en el binario, privada fuera del repo
