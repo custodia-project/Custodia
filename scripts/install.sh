@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     -h|--help)
-      say "usage: install.sh [--version V] [--package FILE --sha256 HEX --signature FILE --allowed-signers FILE]"
+      say "usage: install.sh --version V --package FILE|URL --sha256 HEX --allowed-signers FILE --public-origin URL"
       say "                    [--prefix DIR] [--data-dir DIR] [--config-dir DIR] [--user USER]"
       say "                    [--listen HOST:PORT] [--public-origin URL] [--tls-cert FILE --tls-key FILE]"
       say "                    [--no-systemd] [--uninstall [--purge]]"
@@ -78,7 +78,6 @@ fi
 [ -n "$VERSION" ] || die "--version is required"
 [ -n "$PACKAGE" ] || die "--package is required (local archive or URL)"
 [ -n "$PACKAGE_SHA256" ] || die "--sha256 is required"
-[ -n "$SIGNATURE" ] || die "--signature is required"
 [ -n "$ALLOWED_SIGNERS" ] || die "--allowed-signers is required"
 [ -n "$PUBLIC_ORIGIN" ] || die "--public-origin is required (for example https://custodia.example:8443)"
 
@@ -86,12 +85,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 # Signature and allowed_signers may also be release URLs; keep them local for
 # ssh-keygen without trusting the shell's current directory.
-case "$SIGNATURE" in
-  https://*)
-    curl -fsSL --proto '=https' --tlsv1.2 "$SIGNATURE" -o "$work/signature" || die "download failed: signature"
-    SIGNATURE=$work/signature
-    ;;
-esac
+# The manifest signature travels inside the package and is verified there;
+# --signature is accepted for compatibility and not needed.
 # The release key is the trust anchor: it must come from a channel other than
 # the package, so the installer never downloads it.
 case "$ALLOWED_SIGNERS" in

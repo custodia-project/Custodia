@@ -153,6 +153,22 @@ a.button { text-decoration: none; }
 .scroll-progress { background: var(--brand); bottom: -1px; display: none; height: 2px; left: 0; position: absolute; right: 0; transform: scaleX(0); transform-origin: left center; }
 @keyframes progress { to { transform: scaleX(1); } }
 
+/* ---------- Instalar ---------- */
+.install-note { border: 1px solid var(--ink-400); border-left: 3px solid var(--brand); border-radius: var(--r-md); color: var(--ink-700); font-size: var(--t-sm); line-height: 1.6; margin-top: var(--s-5); max-width: 72ch; padding: var(--s-3) var(--s-4); }
+.install-note strong { color: var(--ink-900); }
+.install-grid { align-items: start; display: grid; gap: var(--s-7); grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr); margin-top: var(--s-6); }
+.install-steps { counter-reset: step; display: grid; gap: var(--s-5); list-style: none; padding: 0; }
+.install-steps li { counter-increment: step; min-width: 0; }
+.install-steps p { color: var(--ink-700); font-size: var(--t-sm); line-height: 1.6; margin-bottom: var(--s-2); }
+.install-steps p::before { color: var(--ink-900); content: counter(step) ". "; font-family: var(--font-data); font-weight: 700; }
+.install-code { background: var(--ink-100); border: 1px solid var(--ink-300); border-radius: var(--r-md); color: var(--ink-900); font-family: var(--font-data); font-size: var(--t-xs); line-height: 1.7; margin: 0; max-width: 100%; overflow-x: auto; padding: var(--s-3) var(--s-4); white-space: pre; }
+.install-code code { color: inherit; font-size: inherit; }
+.install-code:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.install-side { display: grid; gap: var(--s-5); }
+.install-side h3 { font-size: var(--t-lg); margin-bottom: var(--s-2); }
+.install-side ul { color: var(--ink-700); display: grid; font-size: var(--t-sm); gap: var(--s-2); line-height: 1.55; padding-left: 1.1em; }
+.install-docs { color: var(--ink-900); font-size: var(--t-sm); font-weight: 600; }
+
 /* ---------- Estado ---------- */
 .status-grid { align-items: start; display: grid; gap: var(--s-7); grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr); margin-top: var(--s-6); }
 .status-list { display: grid; gap: var(--s-2); }
@@ -175,7 +191,7 @@ a.button { text-decoration: none; }
 
 @media (max-width: 960px) {
   .hero { padding-top: var(--s-6); }
-  .links, .principles, .status-grid { grid-template-columns: minmax(0, 1fr); }
+  .links, .principles, .status-grid, .install-grid { grid-template-columns: minmax(0, 1fr); }
   .site-nav .hide-sm { display: none; }
   .status-list li { gap: var(--s-1); grid-template-columns: minmax(0, 1fr); }
   .logos-next { margin-left: 0; }

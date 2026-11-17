@@ -43,6 +43,7 @@
         <nav class="site-nav" aria-label="{{navLabel}}">
           <a href="#use" class="hide-sm">{{navUse}}</a>
           <a href="#how" class="hide-sm">{{navHow}}</a>
+          <a href="#install" class="hide-sm">{{navInstall}}</a>
           <a href="#status" class="hide-sm">{{navStatus}}</a>
           <a href="https://github.com/octaviosantacruz/Custodia" class="hide-sm">GitHub</a>
           <a href="{{otherHref}}" class="lang" hreflang="{{otherLang}}" lang="{{otherLang}}" aria-label="{{otherLabel}}">{{otherCode}}</a>
@@ -145,13 +146,43 @@
           </ul>
         </section>
 
+        <section class="section" id="install" aria-labelledby="install-title">
+          <p class="section-kicker">{{installKicker}}</p>
+          <h2 id="install-title">{{installTitle}}</h2>
+          <p class="section-lede">{{installLede}}</p>
+          <p class="install-note reveal" role="note">{{installNote}}</p>
+          <div class="install-grid">
+            <ol class="install-steps">
+              <li class="reveal">
+                <p>{{installStep1}}</p>
+                <pre class="install-code" tabindex="0"><code>{{installCmdKey}}</code></pre>
+              </li>
+              <li class="reveal">
+                <p>{{installStep2}}</p>
+                <pre class="install-code" tabindex="0"><code>{{installCmd}}</code></pre>
+              </li>
+            </ol>
+            <div class="install-side">
+              <div class="reveal">
+                <h3>{{installReqTitle}}</h3>
+                <ul><li>{{req1}}</li><li>{{req2}}</li><li>{{req3}}</li><li>{{req4}}</li></ul>
+              </div>
+              <div class="reveal">
+                <h3>{{installAfterTitle}}</h3>
+                <ul><li>{{after1}}</li><li>{{after2}}</li><li>{{after3}}</li><li>{{after4}}</li></ul>
+              </div>
+              <a class="install-docs" href="https://github.com/octaviosantacruz/Custodia/blob/main/docs/INSTALL.md">{{installDocs}} →</a>
+            </div>
+          </div>
+        </section>
+
         <section class="section" id="status" aria-labelledby="status-title">
           <p class="section-kicker">{{statusKicker}}</p>
           <h2 id="status-title">{{statusTitle}}</h2>
           <div class="status-grid">
           <ul class="status-list">
             <li class="reveal"><span class="tag is-done">{{st1t}}</span><p><strong>{{st1h}}</strong>{{st1p}}</p></li>
-            <li class="reveal"><span class="tag">{{st2t}}</span><p><strong>{{st2h}}</strong>{{st2p}}</p></li>
+            <li class="reveal"><span class="tag is-done">{{st2t}}</span><p><strong>{{st2h}}</strong>{{st2p}}</p></li>
             <li class="reveal"><span class="tag">{{st3t}}</span><p><strong>{{st3h}}</strong>{{st3p}}</p></li>
             <li class="reveal"><span class="tag">{{st4t}}</span><p><strong>{{st4h}}</strong>{{st4p}}</p></li>
           </ul>

@@ -19,7 +19,6 @@ sh install.sh \
   --version 0.1.0 \
   --package https://<release>/custodia-0.1.0-linux-amd64.tar.gz \
   --sha256 <hex> \
-  --signature https://<release>/manifest.json.sig \
   --allowed-signers ./allowed_signers \
   --public-origin https://custodia.empresa.example:8443
 ```
