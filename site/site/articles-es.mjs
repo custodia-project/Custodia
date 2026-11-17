@@ -417,6 +417,246 @@ export const articlesEs = {
     ],
   },
 
+  metrics: {
+    path: '/es/metricas/',
+    title: 'Referencia de métricas · CyberArk PAM y Wazuh',
+    description: 'Todas las métricas que Custodia declara en el MVP: fuente, ID, cálculo, fecha de los datos y reglas de completitud para CyberArk PAM y Wazuh.',
+    eyebrow: 'Métricas',
+    h1: 'Las métricas que declara Custodia',
+    headline: 'Las métricas que declara Custodia',
+    lede: 'Una referencia de cada métrica del MVP: qué cuenta, de qué colección sale, cómo cambia la respuesta con datos parciales y dónde está la documentación de origen.',
+    crumb: 'Métricas',
+    status: [
+      { tone: 'done', label: 'Contrato CyberArk PAM probado' },
+      { tone: 'done', label: 'Wazuh 4.14.10 aceptado' },
+      { tone: 'pending', label: 'Métricas personalizadas fuera del MVP' },
+    ],
+    body: `
+<section class="article-section" id="how">
+  <h2>Cómo se calcula una métrica</h2>
+  <p>Cada conector declara sus métricas en el binario, junto a sus colecciones. Una métrica tiene ID versionado, explicación legible, colección de origen, cálculo y unidad. El administrador no define métricas en el MVP, y una métrica no puede leer el payload crudo del proveedor ni un campo fuera de la allowlist del conector.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Cálculo</th><th>Qué significa</th></tr></thead>
+      <tbody>
+        <tr><td><code>count</code></td><td>Registros activos de la colección publicada.</td></tr>
+        <tr><td><code>count_where</code></td><td>Registros activos cuyo campo allowlisted es igual a uno de los valores declarados. Un registro sin el campo no cuenta.</td></tr>
+        <tr><td><code>ratio</code></td><td>Porcentaje con numerador y denominador explícitos, redondeado a un decimal.</td></tr>
+        <tr><td><code>age_over</code></td><td>Registros cuyo campo RFC 3339 es anterior a un umbral fijo de días, medido desde la fecha de publicación.</td></tr>
+        <tr><td><code>count_without</code></td><td>Registros de una colección que ningún registro de una colección hermana referencia por el campo declarado.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Las métricas se calculan al leer sobre la última publicación. No hay tabla de métricas ni valor materializado que pueda separarse de los registros. Cambiar un cálculo crea una versión nueva; un valor histórico no se reinterpreta.</p>
+</section>
+
+<section class="article-section" id="cyberark">
+  <h2>CyberArk PAM</h2>
+  <p>Contrato <code>cyberark-pam-safes-v1</code>. El conector se probó contra fixtures locales que siguen la forma documentada de la API; todavía falta un tenant real de cliente.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Métrica e ID</th><th>Cálculo</th><th>Notas</th></tr></thead>
+      <tbody>
+        <tr><td>Safes totales<br /><code>cyberark-pam.safes.total.v1</code></td><td><code>count</code></td><td>Safes activos en <code>safes</code>.</td></tr>
+        <tr><td>Safes sin miembros<br /><code>cyberark-pam.safes.without_members.v1</code></td><td><code>count_without</code></td><td>Compara <code>safes</code> con <code>safe_members</code>; no se calcula si la colección de miembros es parcial.</td></tr>
+        <tr><td>Cuentas totales<br /><code>cyberark-pam.accounts.total.v1</code></td><td><code>count</code></td><td>Metadatos no secretos de cuentas en <code>accounts</code>.</td></tr>
+        <tr><td>Cuentas con gestión automática deshabilitada<br /><code>cyberark-pam.accounts.auto_management_disabled.v1</code></td><td><code>count_where automatic_management_enabled=false</code></td><td>Una bandera ausente no cuenta.</td></tr>
+        <tr><td>Proporción sin gestión automática<br /><code>cyberark-pam.accounts.auto_management_disabled_ratio.v1</code></td><td><code>ratio</code></td><td>Denominador: cuentas que informan <code>true</code> o <code>false</code>. Puede ser menor que el total de cuentas.</td></tr>
+        <tr><td>Cuentas con último cambio fallido<br /><code>cyberark-pam.accounts.last_change_failed.v1</code></td><td><code>count_where management_status=failure</code></td><td>El estado se normaliza a success, failure o in process.</td></tr>
+        <tr><td>Plataformas inactivas<br /><code>cyberark-pam.platforms.inactive.v1</code></td><td><code>count_where active=false</code></td><td>Las activas son el complemento entre las plataformas que informan la bandera.</td></tr>
+        <tr><td>Plataformas con PSM sin resolver<br /><code>cyberark-pam.platforms.psm_unresolved.v1</code></td><td><code>count_where resolution</code></td><td>Cuenta <code>missing</code> y <code>ambiguous</code> en <code>platform_psm_links</code>; no inventa un destino.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>El cruce plataforma↔PSM distingue <code>exact</code>, <code>casefold</code>, <code>ambiguous</code> y <code>missing</code>. Una fila ambigua registra por qué no se pudieron elegir dos IDs; no es una arista. Ver <a href="/es/conectores/cyberark-pam/">la página de CyberArk</a> para endpoints, allowlist y límites.</p>
+</section>
+
+<section class="article-section" id="wazuh">
+  <h2>Wazuh</h2>
+  <p>Aceptado contra Wazuh 4.14.10 con un manager y un agente de laboratorio. Un manager; alertas e indexer quedan fuera de este conector.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Métrica e ID</th><th>Cálculo</th><th>Notas</th></tr></thead>
+      <tbody>
+        <tr><td>Agentes totales<br /><code>wazuh.agents.total.v1</code></td><td><code>count</code></td><td>Registros activos en <code>agents</code>.</td></tr>
+        <tr><td>Agentes activos<br /><code>wazuh.agents.active.v1</code></td><td><code>count_where status=active</code></td><td>Estado actual del agente.</td></tr>
+        <tr><td>Agentes pendientes<br /><code>wazuh.agents.pending.v1</code></td><td><code>count_where status=pending</code></td><td>Estado actual del agente.</td></tr>
+        <tr><td>Agentes desconectados<br /><code>wazuh.agents.disconnected.v1</code></td><td><code>count_where status=disconnected</code></td><td>Estado actual del agente.</td></tr>
+        <tr><td>Agentes que nunca se conectaron<br /><code>wazuh.agents.never_connected.v1</code></td><td><code>count_where status=never_connected</code></td><td>Estado actual del agente.</td></tr>
+        <tr><td>Agentes sin contacto por más de 7 días<br /><code>wazuh.agents.stale_7d.v1</code></td><td><code>age_over</code></td><td>Umbral fijo de 7 días sobre <code>last_keep_alive</code>. Un agente sin keepalive no cuenta como antiguo.</td></tr>
+        <tr><td>Grupos totales<br /><code>wazuh.groups.total.v1</code></td><td><code>count</code></td><td>Grupos en <code>groups</code>.</td></tr>
+        <tr><td>Grupos vacíos<br /><code>wazuh.groups.empty.v1</code></td><td><code>count_where agent_count=0</code></td><td>Un grupo con cantidad confirmada en cero.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Los estados salen del manager. Un keepalive ausente no es evidencia de antigüedad: se informa como desconocido, no como agente viejo. Ver <a href="/es/conectores/wazuh/">la página de Wazuh</a> para API, RBAC y el ejemplo de aceptación.</p>
+</section>
+
+<section class="article-section" id="states">
+  <h2>Disponible, parcial y no disponible</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Estado</th><th>Qué significa</th></tr></thead>
+      <tbody>
+        <tr><td>Disponible</td><td>La colección tiene una publicación completa y el cálculo tiene todas sus entradas.</td></tr>
+        <tr><td>Parcial</td><td>El valor se muestra con la marca de parcial. Una proporción o un <code>count_without</code> cuyo denominador o referencia es parcial no se calcula.</td></tr>
+        <tr><td>No disponible</td><td>No hay colección configurada o no hay publicación. Nunca se muestra como cero.</td></tr>
+        <tr><td>Cero confirmado</td><td>La publicación contiene explícitamente ningún registro que cumpla el cálculo. Cero es un valor real sólo entonces.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Cada valor lleva la fecha de los datos y el estado de la corrida de sus fuentes. El detalle abre los registros exactos que componen la métrica, con los mismos permisos de la conexión. Una corrida fallida no reemplaza la última publicación; una parcial nunca retira registros.</p>
+</section>
+
+<section class="article-section" id="example">
+  <h2>Un conjunto verificable</h2>
+  <p>La instancia de aceptación de Wazuh reportó 4 agentes (1 activo, 1 desconectado, 2 nunca conectados) y 3 grupos (2 vacíos). Las métricas fueron 4 totales, 1 activo, 0 pendientes, 1 desconectado, 2 nunca conectados, 0 con más de 7 días, 3 grupos y 2 vacíos. Las publicaciones fueron completas, con 4 y 3 registros. Es un ejemplo de laboratorio con datos sintéticos, no un tenant de cliente.</p>
+</section>
+
+<section class="article-section" id="not">
+  <h2>Qué no está en este catálogo</h2>
+  <ul>
+    <li><strong>Métricas personalizadas.</strong> Los administradores no pueden definir métricas nuevas en el MVP; llegan con un conector.</li>
+    <li><strong>Métricas combinadas entre herramientas.</strong> Un valor pertenece a un conector y una conexión. Los totales CyberArk+Wazuh no están en el MVP.</li>
+    <li><strong>Alertas o detecciones de Wazuh.</strong> Las alertas viven en el indexer y este conector no las lee.</li>
+    <li><strong>Una población Identity.</strong> El MVP inventaría herramientas y sus métricas; no modela un directorio de personas como fuente de métricas.</li>
+    <li><strong>Valores en tiempo real.</strong> Las métricas se leen sobre la última publicación, con su fecha y completitud.</li>
+  </ul>
+  <p>La página de <a href="/es/limites/">límites actuales</a> registra qué está implementado, probado y aceptado, y qué sigue pendiente.</p>
+</section>
+`,
+    docs: [
+      { label: 'Reglas de métricas y contratos de conectores', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#métricas-por-conector-decisión-del-dueño-1611' },
+      { label: 'Métricas declaradas de CyberArk', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#métricas-declaradas-de-cyberark-pam' },
+      { label: 'Contrato y aceptación de Wazuh', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#tercer-adaptador-wazuh-agentes-y-grupos' },
+    ],
+    related: [
+      { label: 'Qué inventaría Custodia', href: '/es/inventario/' },
+      { label: 'CyberArk PAM', href: '/es/conectores/cyberark-pam/' },
+      { label: 'Wazuh', href: '/es/conectores/wazuh/' },
+      { label: 'Modelo de seguridad', href: '/es/seguridad/' },
+    ],
+  },
+
+  security: {
+    path: '/es/seguridad/',
+    title: 'Modelo de seguridad · Qué lee y protege Custodia',
+    description: 'Custodia es de solo lectura: no lee contraseñas ni valores de secretos, cifra los secretos de conexión fuera de la base y limita el inventario por permisos de conexión.',
+    eyebrow: 'Seguridad',
+    h1: 'Qué lee, guarda y protege Custodia',
+    headline: 'Qué lee, guarda y protege Custodia',
+    lede: 'Custodia es un inventario de solo lectura, no un sistema de registro de secretos. Esta página fija el límite: qué lee, qué nunca lee, cómo protege las credenciales de conexión, quién puede ver los datos y qué queda fuera de su control.',
+    crumb: 'Seguridad',
+    status: [
+      { tone: 'done', label: 'Conectores de solo lectura' },
+      { tone: 'done', label: 'Secretos de conexión cifrados' },
+      { tone: 'neutral', label: 'El host y root siguen siendo la autoridad' },
+    ],
+    body: `
+<section class="article-section" id="short">
+  <h2>La versión corta</h2>
+  <dl class="article-defs">
+    <div><dt>Lee</dt><dd>Metadatos allowlisted de un conjunto acotado de endpoints. Nunca lee contraseñas de cuentas, valores de secretos, tickets, sesiones ni el payload crudo del proveedor.</dd></div>
+    <div><dt>Guarda</dt><dd>Observaciones, corridas, publicaciones, métricas, permisos, configuración y auditoría. Los secretos de conexión se cifran aparte; la base SQLite no está cifrada en reposo.</dd></div>
+    <div><dt>Protege</dt><dd>Los secretos de conexión con XChaCha20-Poly1305, una clave maestra fuera de la base y del backup, entrada write-only en la API y aislamiento entre conexiones.</dd></div>
+    <div><dt>No protege</dt><dd>La herramienta de origen, los permisos propios de la aplicación, el host o root, la red, el navegador, el endpoint ni un backup que no se proteja.</dd></div>
+  </dl>
+</section>
+
+<section class="article-section" id="reads">
+  <h2>El límite de solo lectura</h2>
+  <p>Cada conector es un contrato versionado con una allowlist. Usa GET y consultas POST documentadas de lectura; no llama a endpoints de alta, edición, borrado ni remediación. Un campo fuera de la allowlist se descarta antes de llegar al inventario.</p>
+  <ul>
+    <li><strong>CyberArk PAM:</strong> Safes, miembros de Safe, metadatos no secretos de cuentas, plataformas, servidores y conectores PSM, y los cruces plataforma↔PSM. Sin contraseñas, valores de secretos, tickets ni sesiones.</li>
+    <li><strong>Wazuh:</strong> agentes y grupos desde la API del manager. Sin alertas, contenido del indexer, claves de agentes ni configuración.</li>
+    <li><strong>Transporte:</strong> HTTPS verificado, CA adicional por tenant, sin seguir redirects ni paginación cross-origin con credenciales, y respuestas y páginas acotadas.</li>
+  </ul>
+  <p>Una corrida fallida o parcial falla cerrada en completitud. No inventa ceros, no retira registros ni reemplaza la última publicación. Ver <a href="/es/conectores/">los contratos de conectores</a> y las <a href="/es/inventario/">reglas del inventario</a>.</p>
+</section>
+
+<section class="article-section" id="secrets">
+  <h2>Secretos de conexión</h2>
+  <p>Un secreto pegado en la consola es <strong>write-only</strong>. Se cifra antes de llegar a SQLite con XChaCha20-Poly1305; la API, la auditoría y el worker nunca devuelven el valor. La API sólo informa que hay un secreto configurado y su versión.</p>
+  <ul>
+    <li><strong>Clave maestra:</strong> 32 bytes aleatorios en <code>master.key</code> (0600), fuera de la base y del backup por defecto.</li>
+    <li><strong>Binding:</strong> el cifrado autenticado liga la versión del formato, el grupo de conexión y el campo; un secreto movido a otra conexión o a una versión anterior no descifra.</li>
+    <li><strong>Referencias:</strong> <code>env:</code>, <code>file:</code> y <code>secret:</code> siguen disponibles. <code>file:</code> y <code>secret:</code> se resuelven sólo dentro del directorio de secretos configurado, nunca contra una ruta arbitraria del host.</li>
+    <li><strong>Aislamiento:</strong> una conexión no puede tomar prestado el secreto cifrado de otra, y cambiar el origen de una conexión con secreto cifrado exige volver a ingresarlo.</li>
+    <li><strong>Rotación:</strong> rotar una credencial reemplaza el valor cifrado y sube su versión. Rotar la clave maestra no está en el MVP.</li>
+    <li><strong>Backup:</strong> el backup SQLite no incluye <code>master.key</code>. Restaurar en otro host exige copiar esa clave por separado, o los secretos cifrados no se descifran.</li>
+  </ul>
+</section>
+
+<section class="article-section" id="stores">
+  <h2>Qué está cifrado y qué no</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Dato</th><th>Protección</th></tr></thead>
+      <tbody>
+        <tr><td>Secretos de conexión</td><td>Cifrados con XChaCha20-Poly1305; clave fuera de la base.</td></tr>
+        <tr><td>Clave maestra</td><td>Archivo modo 0600, fuera de SQLite y del backup por defecto. Copiala aparte.</td></tr>
+        <tr><td>Inventario, corridas, métricas, permisos y auditoría</td><td>Sin cifrado en reposo por parte de Custodia. Protegé el host, el disco y los backups.</td></tr>
+        <tr><td>Registros de auditoría</td><td>En SQLite con el resto del estado. No están cifrados en reposo ni prueban integridad contra quien controla la base.</td></tr>
+        <tr><td>Transporte</td><td>TLS protege los datos en tránsito hacia la consola y entre Custodia y un conector.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>La distinción importa: «Custodia cifra los secretos de conexión» no significa que toda la instalación esté cifrada. El cifrado de disco, el control de acceso al host y la protección de backups siguen siendo responsabilidad del operador.</p>
+</section>
+
+<section class="article-section" id="access">
+  <h2>Quién puede ver el inventario</h2>
+  <ul>
+    <li><strong>Permisos por conexión.</strong> Un usuario necesita permiso de lectura para una conexión; una colección no legible se informa como una no configurada, sin revelar su existencia.</li>
+    <li><strong>Filtrado antes de unir.</strong> Las consultas de inventario y detalle filtran por las concesiones del llamante antes de calcular o correlacionar. Un usuario sin lectura no ve la conexión ni sus registros.</li>
+    <li><strong>Login local.</strong> Las contraseñas se hashean con Argon2id; las sesiones son opacas, revocables y vencen a las 12 horas o a los 30 minutos sin actividad. Las mutaciones usan CSRF y una comprobación exacta de Origin.</li>
+    <li><strong>OIDC.</strong> Opcional y configurado desde la consola con prueba y activación explícita; sin fallback silencioso. La identidad es emisor más sujeto, no una coincidencia de correo. El proveedor puede exigir MFA y política de grupos.</li>
+    <li><strong>Auditoría.</strong> Los cambios administrativos se auditan; las decisiones de acceso aparecen en el historial cuando el journal de auditoría está habilitado. Las filas nunca contienen secretos.</li>
+  </ul>
+  <p>Custodia es una instancia autohospedada única, no un SaaS multiinquilino. No hay aislamiento por tenant, facturación ni plano de control alojado. La página de <a href="/es/limites/">límites</a> registra los bordes de acceso y despliegue.</p>
+</section>
+
+<section class="article-section" id="host">
+  <h2>Host, backup y autoridad</h2>
+  <p>Quien controla el host o root controla la instalación: la base, la configuración, la clave maestra y el proceso. Custodia no es una frontera de seguridad contra un host comprometido o un administrador malicioso.</p>
+  <p>Protegé el host, mantené la clave maestra separada del backup, ensayá el restore en una instancia descartable y restringí quién puede leer el directorio de estado. Un backup viejo puede reactivar autorizaciones revocadas; tratá las copias como sensibles.</p>
+</section>
+
+<section class="article-section" id="limits">
+  <h2>Límites actuales</h2>
+  <ul>
+    <li><strong>CyberArk PAM:</strong> contrato probado contra fixtures; todavía falta un tenant real de cliente.</li>
+    <li><strong>Wazuh:</strong> aceptado contra 4.14.10; un manager, sin cluster, sin alertas ni indexer.</li>
+    <li><strong>Acceso:</strong> sin MFA propia, sin SCIM ni mapeo de grupos desde el proveedor. Faltan un proveedor OIDC real y la aceptación desplegada del login local con TLS/proxy.</li>
+    <li><strong>Secretos:</strong> sin rotación de la clave maestra; el backup excluye la clave; el restore queda en el host.</li>
+    <li><strong>Hosting:</strong> una instancia con SQLite embebido; sin SaaS multiinquilino ni aislamiento por tenant.</li>
+    <li><strong>Alcance:</strong> inventario de solo lectura; sin remediación, postura de dispositivo, tráfico no HTTP ni métricas combinadas entre herramientas en el MVP.</li>
+  </ul>
+</section>
+
+<section class="article-section" id="verify">
+  <h2>Verificar las afirmaciones</h2>
+  <ul>
+    <li>Leé el <a href="https://github.com/custodia-project/Custodia/blob/main/docs/ACCESS.md">contrato de acceso</a> para modos, sesiones y primer administrador.</li>
+    <li>Leé el <a href="https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#secretos-de-conexión-y-gestión">contrato de secretos</a> y la <a href="https://github.com/custodia-project/Custodia/blob/main/docs/VALIDATION.md#clave-maestra-y-backups-1611">regla de clave maestra y backups</a>.</li>
+    <li>Revisá las <a href="/es/metricas/">métricas declaradas</a> y los <a href="/es/conectores/">límites de los conectores</a>.</li>
+    <li>Usá la página de <a href="/es/limites/">límites actuales</a> como fuente de verdad de lo aceptado y lo pendiente.</li>
+  </ul>
+</section>
+`,
+    docs: [
+      { label: 'Contrato de acceso y sesiones', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/ACCESS.md' },
+      { label: 'Secretos y gestión de conexiones', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#secretos-de-conexión-y-gestión' },
+      { label: 'Clave maestra y backups', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/VALIDATION.md#clave-maestra-y-backups-1611' },
+    ],
+    related: [
+      { label: 'Métricas declaradas', href: '/es/metricas/' },
+      { label: 'Límites actuales', href: '/es/limites/' },
+      { label: 'Conectores', href: '/es/conectores/' },
+      { label: 'Instalar', href: '/es/instalar/' },
+    ],
+  },
+
   install: {
     path: '/es/instalar/',
     title: 'Instalar Custodia · Linux, systemd y una release firmada',
@@ -439,7 +679,7 @@ export const articlesEs = {
       <tbody>
         <tr><th>Sistema operativo</th><td>Linux x86_64 o arm64 con systemd. Docker y otros orquestadores no forman parte de este MVP.</td></tr>
         <tr><th>Acceso</th><td>Root para instalar el servicio, el binario y los archivos TLS.</td></tr>
-        <tr><th>Herramientas del host</th><td><code>curl</code> y OpenSSH (<code>ssh-keygen</code>) para verificar firmas. Vienen en la mayoría de las distribuciones.</td></tr>
+        <tr><th>Herramientas del host</th><td><code>curl</code>, <code>ssh-keygen</code> (OpenSSH), <code>openssl</code>, <code>tar</code> y <code>sha256sum</code>. El instalador las comprueba antes de descargar nada; vienen en la mayoría de las distribuciones.</td></tr>
         <tr><th>Dirección</th><td>Un nombre de host o IP para la consola, puerto 8443 por defecto. El puerto 443 requiere <code>CAP_NET_BIND_SERVICE</code>.</td></tr>
         <tr><th>TLS</th><td>Tu certificado y clave, o un certificado autofirmado generado por el instalador con el nombre o IP como SAN.</td></tr>
         <tr><th>Red</th><td>HTTPS saliente a <code>custodia.octaviosantacruz.com</code> para leer el catálogo firmado y descargar el paquete.</td></tr>
@@ -450,17 +690,74 @@ export const articlesEs = {
 </section>
 
 <section class="article-section" id="command">
-  <h2>El comando</h2>
+  <h2>Instalar con un comando</h2>
   <p class="article-callout"><strong>Todavía no publicado.</strong> La primera release pública firmada, v0.1.0, sigue pendiente. El comando de abajo es el flujo previsto y lo ejercitan los gates locales de bootstrap y actualización, pero no lo uses como instalación de producción hasta que se publiquen la release y su clave de firma.</p>
-  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh</code></pre>
-  <p>Sin argumentos, el instalador detecta la arquitectura, lee el canal <code>stable</code> firmado para esa arquitectura, verifica su firma OpenSSH con la clave de release embebida en el script, descarga el paquete que nombra y comprueba su SHA-256. Rechaza un catálogo vencido, de otro canal, de otra arquitectura o una vuelta atrás que no se haya permitido explícitamente.</p>
-  <p>Si preferís inspeccionar el script primero, descargalo con su firma y verificá con la clave de release publicada:</p>
+  <ol>
+    <li>Ejecutalo como root en el servidor:
+      <pre class="install-code is-primary"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh</code></pre>
+    </li>
+    <li>Detecta la arquitectura, lee el catálogo <code>stable</code> firmado, verifica su firma OpenSSH con la clave de release embebida en el script y recién entonces hace dos preguntas. Cada una trae una respuesta lista; Enter la acepta. Muestra qué va a instalar y no cambia nada hasta que confirmás:
+      <pre class="install-preview" tabindex="0" aria-label="Ejemplo de una instalación interactiva"><code><span class="t-dim">Custodia 0.1.0 for linux/amd64 (signed catalog verified).</span>
+Console address (how people will open Custodia) [https://custodia.example.com:8443]: <span class="t-in">↵</span>
+TLS certificate: 1) self-signed  2) my own certificate files [1]: <span class="t-in">↵</span>
+
+Custodia 0.1.0 will be installed:
+  console:     https://custodia.example.com:8443
+  certificate: self-signed for this address
+  binary:      /usr/local/bin/custodia
+  data:        /var/lib/custodia
+  service:     custodia.service (systemd)
+Continue? [Y/n]: <span class="t-in">↵</span>
+<span class="t-dim">…</span>
+<span class="t-ok">Custodia 0.1.0 installed.</span>
+  binary: /usr/local/bin/custodia
+  data:   /var/lib/custodia
+  config: /etc/custodia
+  URL:    https://custodia.example.com:8443
+
+Finish in your browser: open https://custodia.example.com:8443 and create the first
+administrator with this code. It works once and is not stored in clear.
+  <span class="t-key">Setup code: KX7M-P4QR</span> (valid until 10:15 UTC, 15 minutes; a new code replaces this one)
+Need another code? sudo -u custodia /usr/local/bin/custodia setup-code --dir /var/lib/custodia</code></pre>
+    </li>
+    <li>Abrí la dirección de la consola, ingresá el código y elegí tu propia contraseña. Esa cuenta es el primer administrador; ver <a href="#first-admin">más abajo</a>.</li>
+  </ol>
+  <p>Rechaza un catálogo vencido, de otro canal, de otra arquitectura o una vuelta atrás que no se haya permitido explícitamente. Volver a ejecutarlo en un host ya instalado conserva la base y la clave maestra.</p>
+</section>
+
+<section class="article-section" id="verify">
+  <h2>Revisar el script antes de ejecutarlo</h2>
+  <p>Así, por tubería, el script y la clave de release que lleva vienen del mismo sitio, o sea que confiás en su TLS, como con cualquier instalador <code>curl | sh</code>. Para comprobarlo vos, descargá el script y su firma, conseguí la clave de release por otro camino (la copia versionada en el repositorio con la primera release), verificá, leé el script y ejecutá el archivo:</p>
   <pre class="install-code"><code>curl -fsSLO https://custodia.octaviosantacruz.com/install.sh
 curl -fsSLO https://custodia.octaviosantacruz.com/install.sh.sig
-curl -fsSLO https://custodia.octaviosantacruz.com/allowed_signers
+# allowed_signers: la clave de release, tomada de la copia del repositorio
 ssh-keygen -Y verify -f allowed_signers -I custodia-release \\
-  -n custodia-installer -s install.sh.sig &lt; install.sh</code></pre>
-  <p>Con la primera release, la clave pública también quedará versionada en el repositorio como copia para comparar. Hasta que esa release exista no hay un firmante publicado con el que comparar; el script no está listo para una instalación de producción.</p>
+  -n custodia-installer -s install.sh.sig &lt; install.sh
+sudo sh install.sh</code></pre>
+  <p>Para que la instalación confíe sólo en la clave que comprobaste, pasala con <code>--allowed-signers ARCHIVO</code>. El archivo debe ser local, no un enlace, no escribible por grupo u otros y, si el instalador corre como root, propiedad de root. El instalador fija la clave que verificó en <code>/usr/local/lib/custodia/allowed_signers</code>; las actualizaciones posteriores aceptan sólo esa clave, así un compromiso posterior de este sitio no alcanza a servidores ya instalados.</p>
+  <p>Este sitio también publica <code>/allowed_signers</code> para comparar de un vistazo, pero una copia que viene del mismo lugar que el script no agrega un control independiente.</p>
+</section>
+
+<section class="article-section" id="options">
+  <h2>Opciones y automatización</h2>
+  <p>Sin terminal, o con <code>--yes</code>, no pregunta nada y aplica los valores por defecto. Por tubería, las opciones van después de <code>sh -s --</code>:</p>
+  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh -s -- \\
+  --public-origin https://custodia.example.com:8443 --yes</code></pre>
+  <div class="table-wrap">
+    <table class="table is-compact is-flags">
+      <tbody>
+        <tr><th><code>--public-origin URL</code></th><td>Dirección que abre la gente para la consola; empieza con <code>https://</code>. Por defecto: el nombre completo del host, o su primera IP, en el puerto de escucha.</td></tr>
+        <tr><th><code>--tls-cert ARCHIVO --tls-key ARCHIVO</code></th><td>Tu certificado y clave en PEM. Sin ellos se crea un autofirmado para la dirección de la consola.</td></tr>
+        <tr><th><code>--listen HOST:PUERTO</code></th><td>Dirección en la que escucha el servicio. Por defecto <code>0.0.0.0:8443</code>.</td></tr>
+        <tr><th><code>--yes</code></th><td>Acepta los valores por defecto y la confirmación sin preguntar.</td></tr>
+        <tr><th><code>--version V</code></th><td>Falla si el catálogo firmado no nombra exactamente esa versión.</td></tr>
+        <tr><th><code>--allowed-signers ARCHIVO</code></th><td>Confía en esta clave de release en lugar de la embebida en el script.</td></tr>
+        <tr><th><code>--allow-downgrade</code></th><td>Permite instalar una versión más vieja que la instalada.</td></tr>
+        <tr><th><code>--uninstall [--purge]</code></th><td>Quita el servicio y el binario. Datos y configuración quedan, salvo que se agregue <code>--purge</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>sh install.sh --help</code> lista el resto, como <code>--prefix</code>, <code>--data-dir</code>, <code>--config-dir</code> y un <code>--package</code> explícito con su <code>--sha256</code>.</p>
 </section>
 
 <section class="article-section" id="what-it-does">
@@ -473,13 +770,36 @@ ssh-keygen -Y verify -f allowed_signers -I custodia-release \\
     <li>Crea el watcher de actualización y el timer de backup diario. Las actualizaciones se verifican, se respaldan y se revierten con un helper root.</li>
     <li>Imprime un código de configuración de un solo uso en lugar de una contraseña. El código vence en 15 minutos; la persona crea el primer administrador en el navegador.</li>
   </ol>
-  <p>Después de instalar, la consola muestra versión, salud, backups, diagnóstico de conectores y solicitud de actualización. Se puede generar un código nuevo en el host con <code>sudo -u custodia custodia setup-code --dir /var/lib/custodia</code>.</p>
+</section>
+
+<section class="article-section" id="layout">
+  <h2>Dónde queda cada cosa</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <tbody>
+        <tr><th><code>/usr/local/bin/custodia</code></th><td>El binario; <code>custodia version</code> muestra su versión.</td></tr>
+        <tr><th><code>/usr/local/lib/custodia/</code></th><td>La consola web y la clave de release fijada, <code>allowed_signers</code>.</td></tr>
+        <tr><th><code>/var/lib/custodia/state.db</code></th><td>La base SQLite, del usuario <code>custodia</code>.</td></tr>
+        <tr><th><code>/etc/custodia/</code></th><td>Configuración, propiedad de root y legible por el servicio. Contiene <code>master.key</code> y <code>tls/</code>.</td></tr>
+        <tr><th><code>custodia.service</code></th><td>El servicio systemd, más <code>custodia-update.path</code> y <code>custodia-backup.timer</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="article-section" id="first-admin">
   <h2>Primer administrador</h2>
   <p>El instalador no imprime una contraseña. Imprime un código de configuración válido por un solo uso y 15 minutos. Abrí la consola, ingresá el código y elegí tu propia contraseña. El camino de configuración se cierra cuando existe el primer administrador; crear o resetear otros administradores sigue siendo una operación del host hasta que la consola tenga ese recorrido.</p>
+  <p>Si el código venció, generá otro en el host; reemplaza al anterior:</p>
+  <pre class="install-code"><code>sudo -u custodia /usr/local/bin/custodia setup-code --dir /var/lib/custodia</code></pre>
   <p>El login local es el modo base. OIDC se configura desde la consola con una prueba y una activación explícita; no es un fallback silencioso. El contrato detallado de acceso está enlazado abajo.</p>
+</section>
+
+<section class="article-section" id="update">
+  <h2>Actualizar y desinstalar</h2>
+  <p>Después de instalar, la consola muestra versión, salud, backups, diagnóstico de conectores y la actualización disponible. Una actualización pedida desde ahí la aplica un helper root que verifica el paquete firmado, respalda la base, comprueba la salud y vuelve atrás solo si la versión nueva no responde. Nunca instala una versión más vieja que la que corre.</p>
+  <p>Para quitar Custodia, ejecutá el instalador con <code>--uninstall</code>. Detiene y quita las unidades y el binario y conserva datos y configuración; <code>--purge</code> también los borra, incluida la clave maestra:</p>
+  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh -s -- --uninstall</code></pre>
 </section>
 
 <section class="article-section" id="limits">

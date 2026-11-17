@@ -5,5 +5,7 @@ dist
 # Páginas generadas por scripts/build-site.mjs para las entradas de Vite.
 /inventory/
 /connectors/
+/metrics/
+/security/
 /install/
 /limits/

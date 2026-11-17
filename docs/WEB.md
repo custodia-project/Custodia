@@ -101,10 +101,10 @@ muestre: usa sus colores, sus logos, sus nombres de vistas y sus cuatro
 etiquetas de vínculo, y sus pantallas son capturas reales de `web/`. Si un
 texto o un elemento del sitio no se puede encontrar al abrir la demo, sobra.
 Cuando la demo cambia, se regeneran las capturas y se revisan los textos.
-Las páginas de contenido (`/inventory/`, `/connectors/`, `/install/`,
-`/limits/` y sus pares) no son pantallas de la demo: explican contratos,
-requisitos, versiones y límites, con el mismo sistema visual y enlaces a la
-evidencia pública.
+Las páginas de contenido (`/inventory/`, `/connectors/`, `/metrics/`,
+`/security/`, `/install/`, `/limits/` y sus pares) no son pantallas de la demo:
+explican contratos, requisitos, versiones y límites, con el mismo sistema
+visual y enlaces a la evidencia pública.
 
 El sitio se diseña con un método, no con adjetivos. «Moderno» o «limpio» no
 describen nada; cada pedido de diseño nombra:
@@ -210,8 +210,8 @@ El sitio publica su capa para buscadores y asistentes con archivos de
   rutas.
 
 Las páginas de contenido son `/inventory/`, `/connectors/`,
-`/connectors/cyberark-pam/`, `/connectors/wazuh/`, `/install/` y `/limits/`,
-con sus pares `/es/`; los textos viven en
+`/connectors/cyberark-pam/`, `/connectors/wazuh/`, `/metrics/`, `/security/`,
+`/install/` y `/limits/`, con sus pares `/es/`; los textos viven en
 [articles-en.mjs](../site/site/articles-en.mjs) y
 [articles-es.mjs](../site/site/articles-es.mjs). Cada página enlaza los
 contratos públicos que la respaldan y separa lo implementado, lo probado, lo

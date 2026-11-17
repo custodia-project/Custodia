@@ -11,12 +11,16 @@ export const nav = {
   en: {
     inventoryHref: '/inventory/',
     connectorsHref: '/connectors/',
+    metricsHref: '/metrics/',
+    securityHref: '/security/',
     installHref: '/install/',
     limitsHref: '/limits/',
   },
   es: {
     inventoryHref: '/es/inventario/',
     connectorsHref: '/es/conectores/',
+    metricsHref: '/es/metricas/',
+    securityHref: '/es/seguridad/',
     installHref: '/es/instalar/',
     limitsHref: '/es/limites/',
   },
@@ -31,6 +35,8 @@ export const ui = {
     cta: 'Live demo',
     navInventory: 'Inventory',
     navConnectors: 'Connectors',
+    navMetrics: 'Metrics',
+    navSecurity: 'Security',
     navInstall: 'Install',
     navLimits: 'Limits',
     otherCode: 'ES',
@@ -40,6 +46,8 @@ export const ui = {
     copied: 'Copied',
     footInventory: 'Inventory',
     footConnectors: 'Connectors',
+    footMetrics: 'Metrics',
+    footSecurity: 'Security',
     footInstall: 'Install',
     footLimits: 'Limits',
     footDocs: 'Docs',
@@ -71,6 +79,8 @@ export const ui = {
     cta: 'Demo en vivo',
     navInventory: 'Inventario',
     navConnectors: 'Conectores',
+    navMetrics: 'Métricas',
+    navSecurity: 'Seguridad',
     navInstall: 'Instalar',
     navLimits: 'Límites',
     otherCode: 'EN',
@@ -80,6 +90,8 @@ export const ui = {
     copied: 'Copiado',
     footInventory: 'Inventario',
     footConnectors: 'Conectores',
+    footMetrics: 'Métricas',
+    footSecurity: 'Seguridad',
     footInstall: 'Instalar',
     footLimits: 'Límites',
     footDocs: 'Documentación',
@@ -107,7 +119,7 @@ export const ui = {
 
 export const articles = { en: articlesEn, es: articlesEs };
 
-const order = ['inventory', 'connectors', 'cyberark-pam', 'wazuh', 'install', 'limits'];
+const order = ['inventory', 'connectors', 'cyberark-pam', 'wazuh', 'metrics', 'security', 'install', 'limits'];
 const keys = Object.keys(articlesEn);
 if (keys.length !== order.length || order.some((key) => !articlesEn[key] || !articlesEs[key])) {
   throw new Error('articles-en.mjs y articles-es.mjs deben declarar las mismas páginas, en el orden acordado');

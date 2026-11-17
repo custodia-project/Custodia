@@ -417,6 +417,246 @@ export const articlesEn = {
     ],
   },
 
+  metrics: {
+    path: '/metrics/',
+    title: 'Metrics reference · CyberArk PAM and Wazuh',
+    description: 'Every metric Custodia declares in the MVP: source, ID, calculation, data date and completeness rules for CyberArk PAM and Wazuh.',
+    eyebrow: 'Metrics',
+    h1: 'The metrics Custodia declares',
+    headline: 'The metrics Custodia declares',
+    lede: 'A reference for every metric in the MVP: what it counts, which collection it reads, how partial data changes the answer, and where the source documentation lives.',
+    crumb: 'Metrics',
+    status: [
+      { tone: 'done', label: 'CyberArk PAM contract tested' },
+      { tone: 'done', label: 'Wazuh 4.14.10 accepted' },
+      { tone: 'pending', label: 'Custom metrics not in the MVP' },
+    ],
+    body: `
+<section class="article-section" id="how">
+  <h2>How a metric is calculated</h2>
+  <p>Each connector declares its metrics in the binary, next to its collections. A metric has a versioned ID, a readable explanation, a source collection, a calculation and a unit. The administrator does not define metrics in the MVP, and a metric cannot read the raw provider payload or a field outside the connector allowlist.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Calculation</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>count</code></td><td>Active records in the published collection.</td></tr>
+        <tr><td><code>count_where</code></td><td>Active records whose allowlisted field equals one of the declared values. A record without the field does not count.</td></tr>
+        <tr><td><code>ratio</code></td><td>A percentage with an explicit numerator and denominator, rounded to one decimal.</td></tr>
+        <tr><td><code>age_over</code></td><td>Records whose RFC 3339 field is older than a fixed number of days, measured from the publication date.</td></tr>
+        <tr><td><code>count_without</code></td><td>Records in one collection that no record in a sibling collection references through the declared field.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Metrics are computed when read over the last publication. There is no metrics table and no materialized value that can drift from the records. Changing a calculation creates a new metric version; a historical value is not reinterpreted.</p>
+</section>
+
+<section class="article-section" id="cyberark">
+  <h2>CyberArk PAM</h2>
+  <p>Contract <code>cyberark-pam-safes-v1</code>. The connector is tested against local fixtures that follow the documented API shape; a real customer tenant is still pending.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Metric and ID</th><th>Calculation</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Safes total<br /><code>cyberark-pam.safes.total.v1</code></td><td><code>count</code></td><td>Active Safes in <code>safes</code>.</td></tr>
+        <tr><td>Safes without members<br /><code>cyberark-pam.safes.without_members.v1</code></td><td><code>count_without</code></td><td>Compares <code>safes</code> with <code>safe_members</code>; not calculated if the member collection is partial.</td></tr>
+        <tr><td>Accounts total<br /><code>cyberark-pam.accounts.total.v1</code></td><td><code>count</code></td><td>Non-secret account metadata in <code>accounts</code>.</td></tr>
+        <tr><td>Accounts with automatic management disabled<br /><code>cyberark-pam.accounts.auto_management_disabled.v1</code></td><td><code>count_where automatic_management_enabled=false</code></td><td>A missing flag does not count.</td></tr>
+        <tr><td>Share without automatic management<br /><code>cyberark-pam.accounts.auto_management_disabled_ratio.v1</code></td><td><code>ratio</code></td><td>Denominator: accounts that report <code>true</code> or <code>false</code>. It can be smaller than the account total.</td></tr>
+        <tr><td>Accounts with a failed last change<br /><code>cyberark-pam.accounts.last_change_failed.v1</code></td><td><code>count_where management_status=failure</code></td><td>Status is normalized to success, failure or in process.</td></tr>
+        <tr><td>Inactive platforms<br /><code>cyberark-pam.platforms.inactive.v1</code></td><td><code>count_where active=false</code></td><td>Active platforms are the complement among platforms that report the flag.</td></tr>
+        <tr><td>Platforms with unresolved PSM<br /><code>cyberark-pam.platforms.psm_unresolved.v1</code></td><td><code>count_where resolution</code></td><td>Counts <code>missing</code> and <code>ambiguous</code> in <code>platform_psm_links</code>; does not invent a target.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The platform↔PSM link distinguishes <code>exact</code>, <code>casefold</code>, <code>ambiguous</code> and <code>missing</code>. An ambiguous row records why two catalog IDs could not be chosen; it is not an edge. See <a href="/connectors/cyberark-pam/">the CyberArk page</a> for endpoints, allowlist and limits.</p>
+</section>
+
+<section class="article-section" id="wazuh">
+  <h2>Wazuh</h2>
+  <p>Accepted against Wazuh 4.14.10 with a laboratory manager and agent. One manager; alerts and the indexer are outside this connector.</p>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Metric and ID</th><th>Calculation</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Agents total<br /><code>wazuh.agents.total.v1</code></td><td><code>count</code></td><td>Active records in <code>agents</code>.</td></tr>
+        <tr><td>Active agents<br /><code>wazuh.agents.active.v1</code></td><td><code>count_where status=active</code></td><td>Current agent status.</td></tr>
+        <tr><td>Pending agents<br /><code>wazuh.agents.pending.v1</code></td><td><code>count_where status=pending</code></td><td>Current agent status.</td></tr>
+        <tr><td>Disconnected agents<br /><code>wazuh.agents.disconnected.v1</code></td><td><code>count_where status=disconnected</code></td><td>Current agent status.</td></tr>
+        <tr><td>Never-connected agents<br /><code>wazuh.agents.never_connected.v1</code></td><td><code>count_where status=never_connected</code></td><td>Current agent status.</td></tr>
+        <tr><td>Agents without contact for more than 7 days<br /><code>wazuh.agents.stale_7d.v1</code></td><td><code>age_over</code></td><td>Fixed 7-day threshold over <code>last_keep_alive</code>. An agent without keepalive is not counted as old.</td></tr>
+        <tr><td>Groups total<br /><code>wazuh.groups.total.v1</code></td><td><code>count</code></td><td>Groups in <code>groups</code>.</td></tr>
+        <tr><td>Empty groups<br /><code>wazuh.groups.empty.v1</code></td><td><code>count_where agent_count=0</code></td><td>A group with a confirmed count of zero.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The status categories come from the manager. A missing keepalive is not evidence of age; it is reported as unknown, not as an old agent. See <a href="/connectors/wazuh/">the Wazuh page</a> for the API, RBAC and acceptance example.</p>
+</section>
+
+<section class="article-section" id="states">
+  <h2>Available, partial and unavailable</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>State</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td>Available</td><td>The collection has a complete publication and the calculation has every input it needs.</td></tr>
+        <tr><td>Partial</td><td>The value is shown with the partial mark. A ratio or a <code>count_without</code> whose denominator or reference is partial is not calculated.</td></tr>
+        <tr><td>Unavailable</td><td>No configured collection or no publication. It is never displayed as zero.</td></tr>
+        <tr><td>Confirmed zero</td><td>The publication explicitly contains no records that satisfy the calculation. Zero is a real value only then.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Every value carries the data date and the run state of its sources. The drill-down opens the exact records that compose the metric, with the same connection permissions. A failed run does not replace the last publication; a partial run never retires records.</p>
+</section>
+
+<section class="article-section" id="example">
+  <h2>One verifiable set</h2>
+  <p>The Wazuh acceptance instance reported 4 agents (1 active, 1 disconnected, 2 never connected) and 3 groups (2 empty). The metrics were 4 total, 1 active, 0 pending, 1 disconnected, 2 never connected, 0 older than 7 days, 3 groups and 2 empty groups. The publications were complete with 4 and 3 records. This is a laboratory example with synthetic data, not a customer tenant.</p>
+</section>
+
+<section class="article-section" id="not">
+  <h2>What is not in this catalog</h2>
+  <ul>
+    <li><strong>Custom metrics.</strong> Administrators cannot define new metrics in the MVP; they arrive with a connector.</li>
+    <li><strong>Combined metrics across tools.</strong> A value belongs to one connector and one connection. CyberArk-plus-Wazuh totals are not part of the MVP.</li>
+    <li><strong>Wazuh alerts or detections.</strong> Alerts live in the indexer and are not read by this connector.</li>
+    <li><strong>An Identity population.</strong> The MVP inventories tools and their metrics; it does not model a separate people directory as a metric source.</li>
+    <li><strong>Real-time values.</strong> Metrics are read over the last publication, with its date and completeness.</li>
+  </ul>
+  <p>The <a href="/limits/">current limits</a> page records what is implemented, tested and accepted, and what is still pending.</p>
+</section>
+`,
+    docs: [
+      { label: 'Metric rules and connector contracts', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#métricas-por-conector-decisión-del-dueño-1611' },
+      { label: 'Declared CyberArk metrics', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#métricas-declaradas-de-cyberark-pam' },
+      { label: 'Wazuh contract and acceptance', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#tercer-adaptador-wazuh-agentes-y-grupos' },
+    ],
+    related: [
+      { label: 'What Custodia inventories', href: '/inventory/' },
+      { label: 'CyberArk PAM', href: '/connectors/cyberark-pam/' },
+      { label: 'Wazuh', href: '/connectors/wazuh/' },
+      { label: 'Security model', href: '/security/' },
+    ],
+  },
+
+  security: {
+    path: '/security/',
+    title: 'Security model · What Custodia reads and protects',
+    description: 'Custodia is read-only: it never reads passwords or secret values, encrypts connection secrets outside the database, and keeps inventory data behind per-connection permissions.',
+    eyebrow: 'Security',
+    h1: 'What Custodia reads, stores and protects',
+    headline: 'What Custodia reads, stores and protects',
+    lede: 'Custodia is a read-only inventory, not a system of record for secrets. This page states the boundary: what it reads, what it never reads, how it protects connection credentials, who can see the data, and what remains outside its control.',
+    crumb: 'Security',
+    status: [
+      { tone: 'done', label: 'Read-only connectors' },
+      { tone: 'done', label: 'Connection secrets encrypted' },
+      { tone: 'neutral', label: 'Host and root remain the authority' },
+    ],
+    body: `
+<section class="article-section" id="short">
+  <h2>The shortest version</h2>
+  <dl class="article-defs">
+    <div><dt>It reads</dt><dd>Allowlisted metadata from a bounded set of endpoints. It never reads account passwords, secret values, tickets, sessions or the raw provider payload.</dd></div>
+    <div><dt>It stores</dt><dd>Inventory observations, runs, publications, metrics, permissions, configuration and audit. Connection secrets are encrypted separately; the SQLite database itself is not encrypted at rest.</dd></div>
+    <div><dt>It protects</dt><dd>Connection secrets with XChaCha20-Poly1305, a master key outside the database and backup, write-only API input and isolation between connections.</dd></div>
+    <div><dt>It does not protect</dt><dd>The source tool, the application's own permissions, the host or root, the network, the browser, the endpoint, or a backup that is not protected.</dd></div>
+  </dl>
+</section>
+
+<section class="article-section" id="reads">
+  <h2>The read-only boundary</h2>
+  <p>Each connector is a versioned contract with an allowlist. It uses GET requests and documented read-only POST queries; it does not call create, update, delete or remediation endpoints. A field outside the allowlist is discarded before it reaches the inventory.</p>
+  <ul>
+    <li><strong>CyberArk PAM:</strong> Safes, Safe members, non-secret account metadata, platforms, PSM servers and connectors, and the platform↔PSM links. No passwords, secret values, tickets or sessions.</li>
+    <li><strong>Wazuh:</strong> agents and groups from the manager API. No alert data, indexer contents, agent keys or configuration.</li>
+    <li><strong>Transport:</strong> HTTPS is verified, an extra CA can be configured per tenant, redirects and cross-origin pagination are not followed with credentials, and response sizes and pages are bounded.</li>
+  </ul>
+  <p>A failed or partial run fails closed for completeness. It does not invent zeros, retire records or replace the last publication. See <a href="/connectors/">the connector contracts</a> and the <a href="/inventory/">inventory rules</a>.</p>
+</section>
+
+<section class="article-section" id="secrets">
+  <h2>Connection secrets</h2>
+  <p>A secret pasted in the console is <strong>write-only</strong>. It is encrypted before it reaches SQLite with XChaCha20-Poly1305; the API, audit log and worker never return the value. The API only reports that a secret is configured and its version.</p>
+  <ul>
+    <li><strong>Master key:</strong> 32 random bytes in <code>master.key</code> (0600), outside the database and outside the default backup.</li>
+    <li><strong>Binding:</strong> the authenticated encryption binds the format version, connection group and field, so a secret moved to another connection or an older version does not decrypt.</li>
+    <li><strong>References:</strong> <code>env:</code>, <code>file:</code> and <code>secret:</code> remain available. <code>file:</code> and <code>secret:</code> resolve only inside the configured secret directory, never an arbitrary host path.</li>
+    <li><strong>Isolation:</strong> a connection cannot borrow another connection's encrypted secret, and changing the origin of a connection with an encrypted secret requires entering it again.</li>
+    <li><strong>Rotation:</strong> rotating a credential replaces the encrypted value and raises its version. Rotating the master key is not in the MVP.</li>
+    <li><strong>Backup:</strong> the SQLite backup does not include <code>master.key</code>. Restoring on another host requires copying that key separately, or encrypted secrets will not decrypt.</li>
+  </ul>
+</section>
+
+<section class="article-section" id="stores">
+  <h2>What is encrypted, and what is not</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <thead><tr><th>Data</th><th>Protection</th></tr></thead>
+      <tbody>
+        <tr><td>Connection secrets</td><td>Encrypted with XChaCha20-Poly1305; key outside the database.</td></tr>
+        <tr><td>Master key</td><td>File mode 0600, outside SQLite and the default backup. Back it up separately.</td></tr>
+        <tr><td>Inventory, runs, metrics, permissions and audit</td><td>Not encrypted at rest by Custodia. Protect the host, the disk and the backups.</td></tr>
+        <tr><td>Audit records</td><td>Stored in SQLite with the rest of the state. They are not encrypted at rest and do not prove integrity against someone who controls the database.</td></tr>
+        <tr><td>Transport</td><td>TLS protects data in transit to the console and between Custodia and a connector.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>This distinction matters: “Custodia encrypts connection secrets” does not mean the whole installation is encrypted. Full-disk encryption, host access control and backup protection remain the operator's responsibility.</p>
+</section>
+
+<section class="article-section" id="access">
+  <h2>Who can see the inventory</h2>
+  <ul>
+    <li><strong>Per-connection permissions.</strong> A user needs read permission for a connection; a collection that is not readable is reported like one that is not configured, without revealing its existence.</li>
+    <li><strong>Filtered before joins.</strong> Inventory and drill-down queries filter by the caller's grants before calculating or correlating. A user without read access does not see the connection or its records.</li>
+    <li><strong>Local login.</strong> Passwords are hashed with Argon2id; sessions are opaque, revocable and expire after 12 hours or 30 minutes without activity. Mutations use CSRF protection and an exact Origin check.</li>
+    <li><strong>OIDC.</strong> Optional and configured from the console with a test and explicit activation; no silent fallback. The identity is issuer plus subject, not an email match. The provider can enforce MFA and group policy.</li>
+    <li><strong>Audit.</strong> Administrative changes are audited; access decisions appear in the access history when the audit journal is enabled. Audit rows never contain secrets.</li>
+  </ul>
+  <p>Custodia is a single self-hosted instance, not a multi-tenant SaaS. There is no tenant isolation, billing or hosted control plane. The <a href="/limits/">limits page</a> records the access and deployment edges.</p>
+</section>
+
+<section class="article-section" id="host">
+  <h2>Host, backup and authority</h2>
+  <p>Whoever controls the host or root controls the installation: the database, the configuration, the master key and the process. Custodia is not a security boundary against a compromised host or a malicious administrator.</p>
+  <p>Protect the host, keep the master key separate from the backup, rehearse restore on a disposable instance, and restrict who can read the state directory. An old backup can reactivate revoked authorizations; treat backup copies as sensitive.</p>
+</section>
+
+<section class="article-section" id="limits">
+  <h2>Current limits</h2>
+  <ul>
+    <li><strong>CyberArk PAM:</strong> contract tested against fixtures; a real customer tenant is still pending.</li>
+    <li><strong>Wazuh:</strong> accepted against 4.14.10; one manager, no cluster, no alerts or indexer.</li>
+    <li><strong>Access:</strong> no MFA of its own, no SCIM and no group mapping from the provider. A real OIDC provider and a deployed local login with TLS/proxy are still pending.</li>
+    <li><strong>Secrets:</strong> no master-key rotation; the backup excludes the key; restore stays on the host.</li>
+    <li><strong>Hosting:</strong> one instance with embedded SQLite; no multi-tenant SaaS or tenant isolation.</li>
+    <li><strong>Scope:</strong> read-only inventory; no remediation, device posture, non-HTTP traffic or cross-tool combined metrics in the MVP.</li>
+  </ul>
+</section>
+
+<section class="article-section" id="verify">
+  <h2>Verify the claims</h2>
+  <ul>
+    <li>Read the <a href="https://github.com/custodia-project/Custodia/blob/main/docs/ACCESS.md">access contract</a> for modes, sessions and the first administrator.</li>
+    <li>Read the <a href="https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#secretos-de-conexión-y-gestión">secret-management contract</a> and the <a href="https://github.com/custodia-project/Custodia/blob/main/docs/VALIDATION.md#clave-maestra-y-backups-1611">master-key and backup rule</a>.</li>
+    <li>Check the <a href="/metrics/">declared metrics</a> and the <a href="/connectors/">connector boundaries</a>.</li>
+    <li>Use the <a href="/limits/">current limits</a> page as the source of truth for what is accepted and what is pending.</li>
+  </ul>
+</section>
+`,
+    docs: [
+      { label: 'Access contract and sessions', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/ACCESS.md' },
+      { label: 'Connection secrets and management', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/CONNECTORS.md#secretos-de-conexión-y-gestión' },
+      { label: 'Master key and backups', href: 'https://github.com/custodia-project/Custodia/blob/main/docs/VALIDATION.md#clave-maestra-y-backups-1611' },
+    ],
+    related: [
+      { label: 'Declared metrics', href: '/metrics/' },
+      { label: 'Current limits', href: '/limits/' },
+      { label: 'Connectors', href: '/connectors/' },
+      { label: 'Install', href: '/install/' },
+    ],
+  },
+
   install: {
     path: '/install/',
     title: 'Install Custodia · Linux, systemd and a signed release',
@@ -439,7 +679,7 @@ export const articlesEn = {
       <tbody>
         <tr><th>Operating system</th><td>Linux x86_64 or arm64 with systemd. Docker and other orchestrators are not part of this MVP.</td></tr>
         <tr><th>Access</th><td>Root to install the service, the binary and the TLS files.</td></tr>
-        <tr><th>Tools on the host</th><td><code>curl</code> and OpenSSH (<code>ssh-keygen</code>) for signature verification. Both are preinstalled on most distributions.</td></tr>
+        <tr><th>Tools on the host</th><td><code>curl</code>, <code>ssh-keygen</code> (OpenSSH), <code>openssl</code>, <code>tar</code> and <code>sha256sum</code>. The installer checks for them before it downloads anything; all are preinstalled on most distributions.</td></tr>
         <tr><th>Address</th><td>A host name or IP for the console, port 8443 by default. Port 443 needs <code>CAP_NET_BIND_SERVICE</code>.</td></tr>
         <tr><th>TLS</th><td>Your own certificate and key, or a self-signed certificate generated by the installer with the host name or IP as SAN.</td></tr>
         <tr><th>Network</th><td>Outbound HTTPS to <code>custodia.octaviosantacruz.com</code> to read the signed catalog and download the package.</td></tr>
@@ -450,17 +690,74 @@ export const articlesEn = {
 </section>
 
 <section class="article-section" id="command">
-  <h2>The command</h2>
+  <h2>Install in one command</h2>
   <p class="article-callout"><strong>Not published yet.</strong> The first public signed release, v0.1.0, is still pending. The command below is the intended flow and is exercised by the local bootstrap and update gates, but do not use it as a production installation until the release and its signing key are published.</p>
-  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh</code></pre>
-  <p>Without arguments, the installer detects the architecture, reads the signed <code>stable</code> channel for that architecture, verifies its OpenSSH signature with the release key embedded in the script, downloads the package it names and checks its SHA-256. It refuses an expired catalog, another channel, another architecture or a downgrade that was not explicitly allowed.</p>
-  <p>If you prefer to inspect the script first, download it with its signature and verify it with the published release key:</p>
+  <ol>
+    <li>Run it as root on the server:
+      <pre class="install-code is-primary"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh</code></pre>
+    </li>
+    <li>It detects the architecture, reads the signed <code>stable</code> catalog, verifies its OpenSSH signature with the release key embedded in the script and only then asks two questions. Each has a ready answer; press Enter to accept it. It shows what it will install and changes nothing until you confirm:
+      <pre class="install-preview" tabindex="0" aria-label="Example of an interactive installation"><code><span class="t-dim">Custodia 0.1.0 for linux/amd64 (signed catalog verified).</span>
+Console address (how people will open Custodia) [https://custodia.example.com:8443]: <span class="t-in">↵</span>
+TLS certificate: 1) self-signed  2) my own certificate files [1]: <span class="t-in">↵</span>
+
+Custodia 0.1.0 will be installed:
+  console:     https://custodia.example.com:8443
+  certificate: self-signed for this address
+  binary:      /usr/local/bin/custodia
+  data:        /var/lib/custodia
+  service:     custodia.service (systemd)
+Continue? [Y/n]: <span class="t-in">↵</span>
+<span class="t-dim">…</span>
+<span class="t-ok">Custodia 0.1.0 installed.</span>
+  binary: /usr/local/bin/custodia
+  data:   /var/lib/custodia
+  config: /etc/custodia
+  URL:    https://custodia.example.com:8443
+
+Finish in your browser: open https://custodia.example.com:8443 and create the first
+administrator with this code. It works once and is not stored in clear.
+  <span class="t-key">Setup code: KX7M-P4QR</span> (valid until 10:15 UTC, 15 minutes; a new code replaces this one)
+Need another code? sudo -u custodia /usr/local/bin/custodia setup-code --dir /var/lib/custodia</code></pre>
+    </li>
+    <li>Open the console address, enter the setup code and choose your own password. That account is the first administrator; see <a href="#first-admin">below</a>.</li>
+  </ol>
+  <p>It refuses an expired catalog, another channel, another architecture or a downgrade that was not explicitly allowed. Running it again on an installed host keeps the database and the master key.</p>
+</section>
+
+<section class="article-section" id="verify">
+  <h2>Check the script before running it</h2>
+  <p>Piped like this, the script and the release key inside it come from the same site, so you trust that site's TLS, as with any <code>curl | sh</code> installer. To check it yourself, download the script and its signature, get the release key another way (the copy versioned in the repository with the first release), verify, read the script and run the file:</p>
   <pre class="install-code"><code>curl -fsSLO https://custodia.octaviosantacruz.com/install.sh
 curl -fsSLO https://custodia.octaviosantacruz.com/install.sh.sig
-curl -fsSLO https://custodia.octaviosantacruz.com/allowed_signers
+# allowed_signers: the release key, obtained from the repository copy
 ssh-keygen -Y verify -f allowed_signers -I custodia-release \\
-  -n custodia-installer -s install.sh.sig &lt; install.sh</code></pre>
-  <p>With the first release, the public key will also be versioned in the repository as a comparison copy. Until that release exists, there is no published signer to compare; the script is not ready for a production install.</p>
+  -n custodia-installer -s install.sh.sig &lt; install.sh
+sudo sh install.sh</code></pre>
+  <p>To make the installation trust only the key you checked, pass it with <code>--allowed-signers FILE</code>. The file must be local, not a link, not writable by group or others and, when the installer runs as root, owned by root. The installer pins the key it verified in <code>/usr/local/lib/custodia/allowed_signers</code>; later updates accept only that key, so a later compromise of this site does not reach servers already installed.</p>
+  <p><code>/allowed_signers</code> is also published on this site to compare at a glance, but a copy from the same place as the script adds no independent check.</p>
+</section>
+
+<section class="article-section" id="options">
+  <h2>Options and automation</h2>
+  <p>Without a terminal, or with <code>--yes</code>, nothing is asked and the defaults apply. Pass options after <code>sh -s --</code> when piping:</p>
+  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh -s -- \\
+  --public-origin https://custodia.example.com:8443 --yes</code></pre>
+  <div class="table-wrap">
+    <table class="table is-compact is-flags">
+      <tbody>
+        <tr><th><code>--public-origin URL</code></th><td>Console address people open, starting with <code>https://</code>. Default: the host's fully qualified name, or its first IP, on the listen port.</td></tr>
+        <tr><th><code>--tls-cert FILE --tls-key FILE</code></th><td>Your certificate and key in PEM. Without them, a self-signed certificate is created for the console address.</td></tr>
+        <tr><th><code>--listen HOST:PORT</code></th><td>Address the service listens on. Default <code>0.0.0.0:8443</code>.</td></tr>
+        <tr><th><code>--yes</code></th><td>Accept the defaults and the confirmation without asking.</td></tr>
+        <tr><th><code>--version V</code></th><td>Fail unless the signed catalog names exactly this version.</td></tr>
+        <tr><th><code>--allowed-signers FILE</code></th><td>Trust this release key instead of the one embedded in the script.</td></tr>
+        <tr><th><code>--allow-downgrade</code></th><td>Allow installing a version older than the installed one.</td></tr>
+        <tr><th><code>--uninstall [--purge]</code></th><td>Remove the service and the binary. Data and configuration stay unless <code>--purge</code> is added.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><code>sh install.sh --help</code> lists the rest, such as <code>--prefix</code>, <code>--data-dir</code>, <code>--config-dir</code> and an explicit <code>--package</code> with its <code>--sha256</code>.</p>
 </section>
 
 <section class="article-section" id="what-it-does">
@@ -473,13 +770,36 @@ ssh-keygen -Y verify -f allowed_signers -I custodia-release \\
     <li>Creates the update watcher and the daily backup timer. Updates are verified, backed up and rolled back by a root helper.</li>
     <li>Prints a one-use setup code instead of a password. The code expires in 15 minutes; the person creates the first administrator in the browser.</li>
   </ol>
-  <p>After installation, the console shows the version, health, backups, connector diagnostics and update request. A new code can be generated on the host with <code>sudo -u custodia custodia setup-code --dir /var/lib/custodia</code>.</p>
+</section>
+
+<section class="article-section" id="layout">
+  <h2>Where things live</h2>
+  <div class="table-wrap">
+    <table class="table is-compact">
+      <tbody>
+        <tr><th><code>/usr/local/bin/custodia</code></th><td>The binary; <code>custodia version</code> prints its version.</td></tr>
+        <tr><th><code>/usr/local/lib/custodia/</code></th><td>The web console and the pinned release key, <code>allowed_signers</code>.</td></tr>
+        <tr><th><code>/var/lib/custodia/state.db</code></th><td>The SQLite database, owned by the <code>custodia</code> user.</td></tr>
+        <tr><th><code>/etc/custodia/</code></th><td>Configuration, owned by root and readable by the service. Holds <code>master.key</code> and <code>tls/</code>.</td></tr>
+        <tr><th><code>custodia.service</code></th><td>The systemd service, plus <code>custodia-update.path</code> and <code>custodia-backup.timer</code>.</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="article-section" id="first-admin">
   <h2>First administrator</h2>
   <p>The installer does not print a password. It prints a setup code valid for one use and 15 minutes. Open the console, enter the code and choose your own password. The setup path closes after the first administrator exists; creating or resetting other administrators stays on the host until the console grows that workflow.</p>
+  <p>If the code expired, issue a new one on the host; it replaces the previous code:</p>
+  <pre class="install-code"><code>sudo -u custodia /usr/local/bin/custodia setup-code --dir /var/lib/custodia</code></pre>
   <p>Local login is the base mode. OIDC can be configured from the console with a test and an explicit activation; it is not a silent fallback. The detailed access contract is linked below.</p>
+</section>
+
+<section class="article-section" id="update">
+  <h2>Update and uninstall</h2>
+  <p>After installation, the console shows the version, health, backups, connector diagnostics and the available update. An update requested there is applied by a root helper that verifies the signed package, backs up the database, checks health and rolls back on its own if the new version does not answer. It never installs a version older than the running one.</p>
+  <p>To remove Custodia, run the installer with <code>--uninstall</code>. It stops and removes the units and the binary and keeps the data and configuration; <code>--purge</code> also deletes them, including the master key:</p>
+  <pre class="install-code"><code>curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh -s -- --uninstall</code></pre>
 </section>
 
 <section class="article-section" id="limits">
