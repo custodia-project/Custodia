@@ -169,8 +169,9 @@ emisor, exige que `issuer` coincida exactamente, que los endpoints sean HTTPS
 (o loopback numérico) y que el JWKS publique al menos una clave asimétrica de
 firma; además comprueba que el flujo `code` esté anunciado. No simula un login
 interactivo. `POST /api/access/oidc/enable` exige una prueba correcta de la
-configuración vigente hecha en los últimos diez minutos; `disable` la
-desactiva y revoca las sesiones OIDC. Cada cambio y prueba se audita.
+configuración vigente hecha en los últimos diez minutos; además revoca las
+sesiones locales de lectores. `disable` la desactiva y revoca las sesiones
+OIDC. Cada cambio y prueba se audita.
 
 Flujo. `GET /api/auth/oidc/start` exige un proveedor activo y redirige con
 Authorization Code + PKCE S256. `state` y `nonce` son aleatorios de un solo
@@ -212,8 +213,10 @@ Emergencia. Si el proveedor falla o está mal configurado, el administrador
 local entra por el formulario de contraseña de la misma pantalla, bajo el
 rótulo explícito de acceso de administrador local. Ese formulario usa el mismo
 throttling, errores genéricos y política de contraseñas del modo local; una
-cuenta local que no sea administradora no puede usarlo. La recuperación sigue
-siendo `reset-password` en el host.
+cuenta local que no sea administradora no puede usarlo. En modo OIDC sólo se
+acepta la sesión local persistida de ese administrador: una cookie local de
+lector se rechaza aunque su fila todavía exista. La recuperación sigue siendo
+`reset-password` en el host.
 
 Límites de esta entrega. No hay MFA propio (lo aporta el proveedor), mapeo de
 grupos a roles, edición de concesiones después de aprobar, logout iniciado por
@@ -262,10 +265,12 @@ proceso. La contraseña nunca se registra, audita, devuelve ni se acepta como
 argumento de línea de comandos.
 
 Sesión. Login exitoso crea un token aleatorio de 32 bytes; SQLite guarda sólo
-su SHA-256, el principal, creación, última actividad y vencimiento. Cookie
-`__Host-custodia_session` (o `custodia_session` con origen HTTP loopback) con
-`HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, sin dominio ni Max-Age.
-Expiración absoluta 12 horas e inactividad 30 minutos, verificadas en el
+su SHA-256, el principal, creación, última actividad y vencimiento. La fila de
+sesión se inserta condicionada al hash que se acaba de verificar, en la misma
+transacción: un cambio de contraseña concurrente no puede revivir la credencial
+anterior. Cookie `__Host-custodia_session` (o `custodia_session` con origen HTTP
+loopback) con `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, sin dominio ni
+Max-Age. Expiración absoluta 12 horas e inactividad 30 minutos, verificadas en el
 servidor en cada petición; la actividad se registra con resolución de un
 minuto. Cada login y cambio de contraseña emite un token nuevo; el reseteo por
 host revoca todas las sesiones y el siguiente login con la contraseña temporal
@@ -284,12 +289,14 @@ Login. `POST /api/auth/login` con JSON `{username,password}`, cuerpo máximo
 8 KiB y campos desconocidos rechazados. Usuario inexistente y contraseña
 incorrecta dan el mismo 401 «Usuario o contraseña incorrectos.». Una cuenta
 deshabilitada con contraseña correcta da 403. Antes de calcular el hash se
-consultan dos límites persistidos en SQLite: 5 fallos por usuario o 50 por
-IP del socket en 15 minutos bloquean esa clave 15 minutos con 429; el
-bloqueo aplica también a usuarios inexistentes, por lo que no los revela.
-Detrás de un proxy en loopback la IP es la del proxy y su límite actúa como
-freno global. Un login exitoso limpia el contador del usuario. Si la tabla de
-intentos llega a 65.536 claves vigentes, el login falla cerrado con 429.
+reservan atómicamente las dos claves persistidas en SQLite: 5 fallos por
+usuario o 50 por IP del socket en 15 minutos bloquean esa clave 15 minutos con
+429; el bloqueo aplica también a usuarios inexistentes, por lo que no los
+revela. La reserva impide que peticiones concurrentes superen el límite antes
+de que se registre el primer fallo. Detrás de un proxy en loopback la IP es la
+del proxy y su límite actúa como freno global. Un login exitoso limpia el
+contador del usuario. Si la tabla de intentos llega a 65.536 claves vigentes,
+el login falla cerrado con 429.
 
 Estado. `GET /api/auth/status` sin sesión válida responde 200 con
 `authenticated:false`, `mode:"local"` y sin permisos; con sesión, el mismo

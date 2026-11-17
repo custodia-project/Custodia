@@ -1,6 +1,7 @@
 package localauth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -88,8 +89,8 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request, current time.Tim
 		return
 	}
 	ipKey := "setup-ip:" + clientIP(r)
-	keys := []string{ipKey, "setup:all"}
-	locked, err := h.store.LoginLocked(r.Context(), keys, SetupIPAttempts.Window, current)
+	keys := []lab.LoginAttemptKey{{Key: ipKey, Policy: SetupIPAttempts}, {Key: "setup:all", Policy: SetupAllAttempts}}
+	reservation, locked, err := h.store.ReserveLoginAttempt(r.Context(), keys, current)
 	if errors.Is(err, lab.ErrAttemptCapacity) || (err == nil && locked) {
 		detail(w, 429, "Demasiados intentos con códigos equivocados. Esperá unos minutos.")
 		return
@@ -98,6 +99,9 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request, current time.Tim
 		detail(w, 503, "No se pudo verificar el código.")
 		return
 	}
+	defer func() {
+		_ = h.store.ReleaseLoginAttempt(context.WithoutCancel(r.Context()), reservation)
+	}()
 	fail := func() {
 		if _, err := h.store.RecordLoginFailure(r.Context(), ipKey, SetupIPAttempts, "anonymous", current); err != nil {
 			detail(w, 503, "No se pudo verificar el código.")
@@ -152,7 +156,7 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request, current time.Tim
 		detail(w, 503, "La cuenta se creó; iniciá sesión con ella.")
 		return
 	}
-	if err = h.store.StartLocalSession(r.Context(), principal, TokenHash(token), current, current.Add(AbsoluteLifetime)); err != nil {
+	if err = h.store.StartLocalSession(r.Context(), principal, passwordHash, TokenHash(token), current, current.Add(AbsoluteLifetime)); err != nil {
 		detail(w, 503, "La cuenta se creó; iniciá sesión con ella.")
 		return
 	}

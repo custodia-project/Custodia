@@ -32,6 +32,13 @@ func TestWebRoutesNeverHideAPIError(t *testing.T) {
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.body) {
 			t.Fatal(w.Code, w.Body.String())
 		}
+		if tc.path == "/chains/person" {
+			for _, header := range []string{"Content-Security-Policy", "X-Frame-Options", "Referrer-Policy"} {
+				if w.Header().Get(header) == "" {
+					t.Fatal("missing", header)
+				}
+			}
+		}
 	}
 	if _, err = WithWeb(api, t.TempDir()); err == nil {
 		t.Fatal("unbuilt frontend accepted")

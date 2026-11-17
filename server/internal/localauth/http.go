@@ -175,6 +175,8 @@ func clientIP(r *http.Request) string {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Content-Security-Policy", lab.ContentSecurityPolicy)
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
 		// The compiled interface holds no data; it must load to show the login.
 		if h.files == nil {
@@ -343,12 +345,12 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request, current time.Tim
 	}
 	username, valid := lab.NormalizeLocalUsername(input.Username)
 	ipKey := "ip:" + clientIP(r)
-	keys := []string{ipKey}
+	keys := []lab.LoginAttemptKey{{Key: ipKey, Policy: IPAttempts}}
 	if valid {
-		keys = append(keys, "user:"+username)
+		keys = append(keys, lab.LoginAttemptKey{Key: "user:" + username, Policy: UserAttempts})
 	}
-	locked, err := h.store.LoginLocked(r.Context(), keys, UserAttempts.Window, current)
-	if err == lab.ErrAttemptCapacity || (err == nil && locked) {
+	reservation, locked, err := h.store.ReserveLoginAttempt(r.Context(), keys, current)
+	if errors.Is(err, lab.ErrAttemptCapacity) || (err == nil && locked) {
 		detail(w, 429, tooMany)
 		return
 	}
@@ -356,6 +358,11 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request, current time.Tim
 		detail(w, 503, "No se pudo verificar el acceso.")
 		return
 	}
+	// The claim is released whether the password matches, the account is
+	// disabled or an error interrupts the rest of the login.
+	defer func() {
+		_ = h.store.ReleaseLoginAttempt(context.WithoutCancel(r.Context()), reservation)
+	}()
 	var credential lab.LocalCredential
 	matched := false
 	if valid {
@@ -411,7 +418,11 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request, current time.Tim
 		detail(w, 503, "No se pudo iniciar la sesión.")
 		return
 	}
-	if err = h.store.StartLocalSession(r.Context(), credential.Principal, TokenHash(token), current, current.Add(AbsoluteLifetime)); err != nil {
+	if err = h.store.StartLocalSession(r.Context(), credential.Principal, credential.PasswordHash, TokenHash(token), current, current.Add(AbsoluteLifetime)); err != nil {
+		if errors.Is(err, lab.ErrLocalConflict) {
+			detail(w, 401, invalidLogin)
+			return
+		}
 		if errors.Is(err, lab.ErrDenied) {
 			detail(w, 403, "Tu cuenta no está habilitada en Custodia. Contactá al administrador.")
 			return
@@ -433,8 +444,8 @@ func (h *handler) changePassword(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	userKey := "user:" + session.Subject
-	locked, err := h.store.LoginLocked(r.Context(), []string{userKey}, UserAttempts.Window, current)
-	if err == lab.ErrAttemptCapacity || (err == nil && locked) {
+	reservation, locked, err := h.store.ReserveLoginAttempt(r.Context(), []lab.LoginAttemptKey{{Key: userKey, Policy: UserAttempts}}, current)
+	if errors.Is(err, lab.ErrAttemptCapacity) || (err == nil && locked) {
 		detail(w, 429, tooMany)
 		return
 	}
@@ -442,6 +453,9 @@ func (h *handler) changePassword(w http.ResponseWriter, r *http.Request, session
 		detail(w, 503, "No se pudo verificar la contraseña.")
 		return
 	}
+	defer func() {
+		_ = h.store.ReleaseLoginAttempt(context.WithoutCancel(r.Context()), reservation)
+	}()
 	credential, err := h.store.LocalCredential(r.Context(), session.Subject)
 	if err != nil {
 		detail(w, 503, "No se pudo verificar la contraseña.")

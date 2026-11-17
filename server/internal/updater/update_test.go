@@ -1,6 +1,10 @@
 package updater
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -151,5 +155,105 @@ func TestCheckTrustAnchorRefusesWritableOrLinkedKeys(t *testing.T) {
 	}
 	if err := checkTrustAnchor(link); err == nil {
 		t.Fatal("symlinked release key accepted")
+	}
+}
+
+type archiveEntry struct {
+	name     string
+	body     []byte
+	typeflag byte
+	linkname string
+}
+
+func writeTestArchive(t *testing.T, entries ...archiveEntry) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "release.tar.gz")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gzipWriter := gzip.NewWriter(file)
+	tarWriter := tar.NewWriter(gzipWriter)
+	for _, entry := range entries {
+		flag := entry.typeflag
+		if flag == 0 {
+			flag = tar.TypeReg
+		}
+		header := &tar.Header{Name: entry.name, Mode: 0o600, Size: int64(len(entry.body)), Typeflag: flag, Linkname: entry.linkname}
+		if err = tarWriter.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if flag == tar.TypeReg {
+			if _, err = tarWriter.Write(entry.body); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err = tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = gzipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestExtractRefusesPastTheAggregateBudget(t *testing.T) {
+	archive := writeTestArchive(t, archiveEntry{name: "package/payload", body: bytes.Repeat([]byte("a"), 2<<20)})
+	destination := t.TempDir()
+	if err := extract(archive, destination, 1<<20); err == nil || !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("oversized extraction error = %v", err)
+	}
+	var total int64
+	if err := filepath.WalkDir(destination, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if total > 1<<20 {
+		t.Fatalf("extracted %d bytes past the budget", total)
+	}
+}
+
+// If extraction ran before the signature check, the symlink would fail first.
+// The signature error proves the manifest is authenticated before any write.
+func TestApplyVerifiesTheManifestBeforeExtracting(t *testing.T) {
+	manifest := []byte(`{"version":"0.2.0","files":[]}`)
+	archive := writeTestArchive(t,
+		archiveEntry{name: "custodia-0.2.0-linux-amd64/manifest.json", body: manifest},
+		archiveEntry{name: "custodia-0.2.0-linux-amd64/link", typeflag: tar.TypeSymlink, linkname: "/etc/passwd"},
+	)
+	content, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	root := t.TempDir()
+	signers := filepath.Join(root, "allowed_signers")
+	if err := os.WriteFile(signers, []byte("custodia-release ssh-ed25519 AAAA\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	signature := filepath.Join(root, "manifest.json.sig")
+	if err := os.WriteFile(signature, []byte("not a signature"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = Apply(context.Background(), Options{
+		DataDir: filepath.Join(root, "data"), Binary: filepath.Join(root, "bin", "custodia"), WebDir: filepath.Join(root, "web"),
+		Package: archive, SHA256: hex.EncodeToString(digest[:]), Signature: signature, AllowedSigners: signers,
+		Version: "0.2.0", CurrentVersion: "0.1.0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "release signature rejected") {
+		t.Fatalf("unsigned archive was not rejected at the signature: %v", err)
 	}
 }

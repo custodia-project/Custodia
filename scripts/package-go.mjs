@@ -14,6 +14,18 @@ const outputRoot = resolve(outIndex >= 0 ? args[outIndex + 1] : join(root, 'arti
 const keyIndex = args.indexOf('--signing-key');
 const signingKey = keyIndex >= 0 ? resolve(args[keyIndex + 1]) : null;
 const version = process.env.CUSTODIA_VERSION || '0.0.0-dev';
+
+// A release must be built with a toolchain that has the standard-library
+// security fixes. The go.mod toolchain directive selects it when available.
+const goVersion = execFileSync('go', ['env', 'GOVERSION'], { cwd: join(root, 'server'), encoding: 'utf8' }).trim();
+const goMatch = /^go(\d+)\.(\d+)(?:\.(\d+))?/.exec(goVersion);
+const goNumeric = goMatch ? goMatch.slice(1, 4).map((part) => Number(part ?? 0)) : null;
+const goAtLeast = (found, major, minor, patch) => found[0] > major ||
+  found[0] === major && (found[1] > minor || found[1] === minor && found[2] >= patch);
+if (!goNumeric || !goAtLeast(goNumeric, 1, 27, 4)) {
+  throw new Error(`Go 1.27.4 or newer is required to package a release (found ${goVersion})`);
+}
+
 const platform = process.platform;
 // CUSTODIA_ARCH cross-compiles (the binary is pure Go); default: this host.
 const architecture = process.env.CUSTODIA_ARCH || (process.arch === 'x64' ? 'amd64' : process.arch);

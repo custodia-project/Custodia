@@ -128,7 +128,9 @@ cada archivo: instalador y actualizador comprueban que cada archivo extraído
 figure en él con su tamaño y SHA-256, que no falte ninguno y que no haya
 archivos de más. El SHA-256 del archivo comprimido sólo protege la descarga.
 Antes de extraer, el instalador rechaza enlaces, archivos especiales, rutas
-absolutas y `..`; el actualizador extrae en un directorio privado de root y
+absolutas y `..`. El actualizador lee el manifiesto del archivo comprimido sin
+escribir nada, verifica su firma y sólo entonces extrae en un directorio privado
+de root con un presupuesto total derivado de los tamaños firmados; después
 verifica esa copia. El actualizador rechaza además una release que no sea más
 nueva que la instalada, para que una release firmada vieja no sirva para
 volver atrás.

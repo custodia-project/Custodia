@@ -9,7 +9,7 @@
     "test:web": "npm --prefix web run test:unit",
     "verify:web": "npm --prefix web run typecheck && npm --prefix web run lint && npm --prefix web run verify:styles && npm --prefix web run test:unit && npm --prefix web run build:demo && npm --prefix web run test:e2e",
     "build:site": "npm --prefix site run build",
-    "verify:go": "cd server && go vet ./... && go test -race ./... && go build ./...",
+    "verify:go": "cd server && go vet ./... && go test -race ./... && go build ./... && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...",
     "verify:go:web": "node scripts/verify-go-web.mjs",
     "verify:go:local": "node scripts/verify-go-local.mjs",
     "verify:go:secrets": "node scripts/verify-go-secrets.mjs",

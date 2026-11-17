@@ -216,7 +216,7 @@ func (h *handler) backups(w http.ResponseWriter, r *http.Request, session lab.Lo
 		}
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/api/system/backups/")
-	if name == "" || strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".db") {
+	if name == "" || strings.ContainsAny(name, "/\\\"\r\n") || !strings.HasSuffix(name, ".db") {
 		detail(w, 404, "Backup no encontrado.")
 		return
 	}
@@ -230,6 +230,17 @@ func (h *handler) backups(w http.ResponseWriter, r *http.Request, session lab.Lo
 		return
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		detail(w, 404, "Backup no encontrado.")
+		return
+	}
+	// A backup carries password hashes, encrypted secrets and session digests;
+	// reading it is an auditable administrative action, not a silent download.
+	if err := h.store.RecordAudit(r.Context(), session.Actor(), "system_backup_downloaded", map[string]any{"name": name, "size": info.Size()}, current); err != nil {
+		detail(w, 503, "No se pudo auditar la descarga.")
+		return
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	w.Header().Set("Cache-Control", "no-store")

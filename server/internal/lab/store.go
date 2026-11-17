@@ -144,6 +144,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err = migrateSetupCodes(ctx, tx); err != nil {
 		return err
 	}
+	// Migration 14 must stay last: earlier migrations guard on the highest
+	// recorded version and would be skipped if a newer row already existed.
+	if err = migrateLoginReservations(ctx, tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

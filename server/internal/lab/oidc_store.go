@@ -227,7 +227,16 @@ func (s *Store) EnableOIDC(ctx context.Context, actor Principal, now time.Time) 
 	if _, err = tx.ExecContext(ctx, "UPDATE oidc_config SET enabled=1 WHERE id=1"); err != nil {
 		return err
 	}
-	if err = audit(ctx, tx, actor.Actor(), "enable_oidc", map[string]any{"enabled": true}, now); err != nil {
+	// Switching to OIDC ends every local reader session. The break-glass
+	// administrator keeps its local credentials; readers do not.
+	revoked, err := tx.ExecContext(ctx, `DELETE FROM local_sessions WHERE principal_id IN (
+SELECT p.id FROM lab_principals p JOIN local_accounts a ON a.principal_id=p.id
+WHERE p.issuer=? AND NOT EXISTS(SELECT 1 FROM gateway_administrators g WHERE g.principal_id=p.id))`, LocalIssuer)
+	if err != nil {
+		return err
+	}
+	sessions, _ := revoked.RowsAffected()
+	if err = audit(ctx, tx, actor.Actor(), "enable_oidc", map[string]any{"enabled": true, "revoked_local_readers": sessions}, now); err != nil {
 		return err
 	}
 	return tx.Commit()

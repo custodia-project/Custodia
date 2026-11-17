@@ -366,6 +366,50 @@ func TestOIDCAdminConfigAndActivation(t *testing.T) {
 	}
 }
 
+func TestOIDCRejectsPersistedLocalReaderSession(t *testing.T) {
+	x := newOIDCHarness(t)
+	admin := x.loginAdmin()
+	ctx := context.Background()
+	hash, err := HashPassword(ctx, readerPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = x.store.CreateLocalUser(ctx, x.adminPrincipal(), "reader", "Reader", hash, nil, x.now); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := x.store.LocalCredential(ctx, "reader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.Repeat("R", 43)
+	if err = x.store.StartLocalSession(ctx, reader.Principal, reader.PasswordHash, TokenHash(token), x.now, x.now.Add(AbsoluteLifetime)); err != nil {
+		t.Fatal(err)
+	}
+	readerSession := &session{cookie: token}
+	if w := x.do("GET", "/api/connections", "", readerSession, nil); w.Code != 401 {
+		t.Fatalf("local reader cookie accepted in OIDC mode: %d", w.Code)
+	}
+	if w := x.do("GET", "/api/auth/status", "", readerSession, nil); !strings.Contains(w.Body.String(), `"authenticated":false`) {
+		t.Fatalf("local reader cookie reported authenticated in OIDC mode: %s", w.Body.String())
+	}
+	// The host-created local administrator remains the explicit break-glass
+	// path while OIDC is active.
+	if w := x.do("GET", "/api/connections", "", admin, nil); w.Code != 200 {
+		t.Fatalf("break-glass administrator session rejected: %d", w.Code)
+	}
+	// Enabling the provider also removes the reader's stored session, so it
+	// cannot come back if the mode is switched later.
+	x.saveConfig(admin)
+	x.enable(admin)
+	var sessions int
+	if err = x.store.DB.QueryRow("SELECT count(*) FROM local_sessions WHERE principal_id=?", reader.ID).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatal("reader session survived OIDC activation", sessions, err)
+	}
+	if w := x.do("GET", "/api/connections", "", admin, nil); w.Code != 200 {
+		t.Fatalf("enabling OIDC revoked the administrator session: %d", w.Code)
+	}
+}
+
 func TestOIDCLoginLifecycle(t *testing.T) {
 	x := newOIDCHarness(t)
 	admin := x.loginAdmin()

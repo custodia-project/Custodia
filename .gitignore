@@ -29,3 +29,5 @@ site/public/install.sh
 site/public/install.sh.sig
 site/public/allowed_signers
 site/public/releases/
+# Material privado (revisiones de seguridad y notas de trabajo): nunca se publica.
+/docs/local/

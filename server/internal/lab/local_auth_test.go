@@ -3,6 +3,8 @@ package lab
 import (
 	"context"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -80,5 +82,51 @@ func TestLocalAuthMigrationUpgradesVersionEight(t *testing.T) {
 	hash := "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGg"
 	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, []string{IdentityConnection}, false, now); err != nil {
 		t.Fatal("upgraded database cannot bootstrap the first local administrator", err)
+	}
+}
+
+func TestLoginReservationsCapConcurrentAdmissions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	s, err := Open(filepath.Join(t.TempDir(), "reservations.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Close()
+	if err = s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	policy := AttemptPolicy{Limit: 5, Window: 15 * time.Minute, Lock: 15 * time.Minute}
+	keys := []LoginAttemptKey{{Key: "user:concurrent", Policy: policy}}
+	var admitted atomic.Int32
+	var wait sync.WaitGroup
+	reservations := make(chan string, 32)
+	for range 32 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			reservation, locked, err := s.ReserveLoginAttempt(ctx, keys, now)
+			if err == nil && !locked {
+				admitted.Add(1)
+				reservations <- reservation
+			}
+		}()
+	}
+	wait.Wait()
+	close(reservations)
+	if admitted.Load() != int32(policy.Limit) {
+		t.Fatalf("admitted %d concurrent attempts, limit=%d", admitted.Load(), policy.Limit)
+	}
+	for reservation := range reservations {
+		if err = s.ReleaseLoginAttempt(ctx, reservation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reservation, locked, err := s.ReserveLoginAttempt(ctx, keys, now)
+	if err != nil || locked || reservation == "" {
+		t.Fatalf("reservation not reusable after release: id=%q locked=%v err=%v", reservation, locked, err)
+	}
+	if err = s.ReleaseLoginAttempt(ctx, reservation); err != nil {
+		t.Fatal(err)
 	}
 }

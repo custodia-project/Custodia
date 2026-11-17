@@ -67,8 +67,20 @@ func (h *handler) oidcStatus(ctx context.Context) map[string]any {
 // between providers.
 func (h *handler) resolveSession(r *http.Request, token string, current time.Time) (lab.LocalSession, error) {
 	session, err := h.store.ResolveLocalSession(r.Context(), TokenHash(token), IdleTimeout, current)
-	if !h.oidcMode() || err != lab.ErrNoSession {
+	if err != nil && err != lab.ErrNoSession {
 		return session, err
+	}
+	if !h.oidcMode() {
+		return session, err
+	}
+	if err == nil {
+		// OIDC mode accepts a persisted local session only for the
+		// host-created break-glass administrator. A reader's local cookie is
+		// not a second authentication path.
+		if h.store.IsAdministrator(r.Context(), session.Principal) {
+			return session, nil
+		}
+		return lab.LocalSession{}, lab.ErrNoSession
 	}
 	config, err := h.store.GetOIDCConfig(r.Context())
 	if errors.Is(err, lab.ErrOIDCNotConfigured) {

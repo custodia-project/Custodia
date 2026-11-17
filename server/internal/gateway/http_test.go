@@ -175,7 +175,7 @@ func TestOzalModeRejectsLocalSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("A", 43)
-	if err = s.StartLocalSession(ctx, local.Principal, localauth.TokenHash(token), now, now.Add(time.Hour)); err != nil {
+	if err = s.StartLocalSession(ctx, local.Principal, local.PasswordHash, localauth.TokenHash(token), now, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{Issuer: "https://login.acme.example", Audience: "custodia", PublicOrigin: "https://custodia.acme.example", Keys: map[string]ed25519.PublicKey{KeyID(pub): pub}}

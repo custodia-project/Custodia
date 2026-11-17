@@ -3,9 +3,11 @@ package localauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -420,6 +422,94 @@ func TestHostPasswordReset(t *testing.T) {
 	w, recovered := x.login("ada.admin", "recovered temporary passphrase")
 	if recovered == nil || !strings.Contains(w.Body.String(), `"must_change_password":true`) {
 		t.Fatal("reset did not clear lockout or mark temporary", w.Code, w.Body.String())
+	}
+}
+
+func TestChangedPasswordCannotCreateSessionFromInFlightLogin(t *testing.T) {
+	x := newHarness(t)
+	ctx := context.Background()
+	credential, err := x.store.LocalCredential(ctx, "ada.admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := HashPassword(ctx, "replacement password for the login race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldToken := TokenHash("in-flight-old-password")
+	if err = x.store.ChangeLocalPassword(ctx, credential.Principal, credential.PasswordHash, replacement, TokenHash("current-password-session"), x.now, x.now.Add(AbsoluteLifetime)); err != nil {
+		t.Fatal(err)
+	}
+	if err = x.store.StartLocalSession(ctx, credential.Principal, credential.PasswordHash, oldToken, x.now, x.now.Add(AbsoluteLifetime)); !errors.Is(err, lab.ErrLocalConflict) {
+		t.Fatalf("old credential created a session: %v", err)
+	}
+	var sessions int
+	if err = x.store.DB.QueryRow("SELECT count(*) FROM local_sessions WHERE token_hash=?", oldToken).Scan(&sessions); err != nil || sessions != 0 {
+		t.Fatal("old session row exists", sessions, err)
+	}
+	if w, _ := x.login("ada.admin", adminPassword); w.Code != 401 {
+		t.Fatal("old password logged in after the change", w.Code)
+	}
+}
+
+func TestLoginReservationsBlockBeforePasswordHashing(t *testing.T) {
+	x := newHarness(t)
+	ctx := context.Background()
+	keys := []lab.LoginAttemptKey{
+		{Key: "ip:127.0.0.1", Policy: IPAttempts},
+		{Key: "user:ada.admin", Policy: UserAttempts},
+	}
+	reservations := []string{}
+	for i := 0; i < UserAttempts.Limit; i++ {
+		reservation, locked, err := x.store.ReserveLoginAttempt(ctx, keys, x.now)
+		if err != nil || locked {
+			t.Fatal("could not reserve attempt", i, locked, err)
+		}
+		reservations = append(reservations, reservation)
+	}
+	if w, _ := x.login("ada.admin", adminPassword); w.Code != 429 {
+		t.Fatal("login verified a password past the reservation limit", w.Code)
+	}
+	for _, reservation := range reservations {
+		if err := x.store.ReleaseLoginAttempt(ctx, reservation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w, session := x.login("ada.admin", adminPassword); w.Code != 200 || session == nil {
+		t.Fatal("released reservations did not admit the login", w.Code, w.Body.String())
+	}
+}
+
+func TestConsoleAndBackupDownloadSecurityHeaders(t *testing.T) {
+	x := newHarness(t)
+	_, admin := x.login("ada.admin", adminPassword)
+	data := t.TempDir()
+	backups := filepath.Join(data, "backups")
+	if err := os.MkdirAll(backups, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("synthetic backup")
+	if err := os.WriteFile(filepath.Join(backups, "manual.db"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	x.h.(*handler).config.DataDir = data
+	for _, path := range []string{"/", "/api/system/backups/manual.db"} {
+		w := x.do("GET", path, "", admin, nil)
+		if w.Code != 200 {
+			t.Fatal(path, w.Code, w.Body.String())
+		}
+		for _, header := range []string{"Content-Security-Policy", "X-Frame-Options", "Referrer-Policy"} {
+			if w.Header().Get(header) == "" {
+				t.Fatal(path, "missing", header)
+			}
+		}
+		if path != "/" && w.Body.String() != string(body) {
+			t.Fatal("backup body", w.Body.String())
+		}
+	}
+	var audited int
+	if err := x.store.DB.QueryRow("SELECT count(*) FROM lab_audit WHERE action='system_backup_downloaded' AND CAST(after_json AS TEXT) LIKE '%manual.db%'").Scan(&audited); err != nil || audited != 1 {
+		t.Fatal("backup download not audited", audited, err)
 	}
 }
 

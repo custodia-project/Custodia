@@ -2,7 +2,9 @@ package lab
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,10 @@ const LocalIssuer = "custodia-local"
 // LoginAttemptCapacity bounds the persisted throttling table. When it is full
 // the login fails closed instead of evicting live lockouts.
 const LoginAttemptCapacity = 65536
+
+// loginReservationLifetime bounds an admission claimed before the password
+// hash runs. A crashed request leaves at most this much delay behind.
+const loginReservationLifetime = 5 * time.Minute
 
 var (
 	ErrNoSession       = errors.New("no valid local session")
@@ -51,6 +57,22 @@ CREATE TABLE IF NOT EXISTS local_sessions(token_hash TEXT PRIMARY KEY,principal_
 CREATE INDEX IF NOT EXISTS local_sessions_principal ON local_sessions(principal_id);
 CREATE TABLE IF NOT EXISTS local_login_attempts(attempt_key TEXT PRIMARY KEY,failures INTEGER NOT NULL,window_start INTEGER NOT NULL,locked_until INTEGER NOT NULL);
 INSERT OR IGNORE INTO lab_schema_migrations VALUES(9);`)
+	return err
+}
+
+// migrateLoginReservations is migration 14: a login claims an attempt before
+// the expensive password hash runs. Without the claim, concurrent requests all
+// passed the lock check before any of them recorded a failure.
+func migrateLoginReservations(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS local_login_reservations(
+reservation_id TEXT NOT NULL,
+attempt_key TEXT NOT NULL,
+created_at INTEGER NOT NULL,
+PRIMARY KEY(reservation_id,attempt_key)
+);
+CREATE INDEX IF NOT EXISTS local_login_reservations_key ON local_login_reservations(attempt_key);
+CREATE INDEX IF NOT EXISTS local_login_reservations_age ON local_login_reservations(created_at);
+INSERT OR IGNORE INTO lab_schema_migrations VALUES(14);`)
 	return err
 }
 
@@ -184,39 +206,103 @@ type AttemptPolicy struct {
 	Window, Lock time.Duration
 }
 
-// LoginLocked reports whether any key is locked. Expired rows are cleaned and
-// a full table fails closed.
-func (s *Store) LoginLocked(ctx context.Context, keys []string, window time.Duration, now time.Time) (bool, error) {
+// LoginAttemptKey is one throttling key and the policy that applies to it.
+type LoginAttemptKey struct {
+	Key    string
+	Policy AttemptPolicy
+}
+
+// ReserveLoginAttempt claims one attempt for every key before the password
+// hash runs. The claim is persisted, so concurrent requests cannot all pass
+// the lock check and then verify: at most Limit attempts are in flight or
+// recorded per key. The returned reservation must be released once the
+// verification finishes.
+func (s *Store) ReserveLoginAttempt(ctx context.Context, keys []LoginAttemptKey, now time.Time) (string, bool, error) {
+	if len(keys) == 0 {
+		return "", false, nil
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return true, err
+		return "", true, err
 	}
 	defer tx.Rollback()
 	current := now.Unix()
-	if _, err = tx.ExecContext(ctx, "DELETE FROM local_login_attempts WHERE locked_until<=? AND window_start<=?", current, current-int64(window/time.Second)); err != nil {
-		return true, err
+	oldest := current - int64(loginReservationLifetime/time.Second)
+	if _, err = tx.ExecContext(ctx, "DELETE FROM local_login_reservations WHERE created_at<=?", oldest); err != nil {
+		return "", true, err
 	}
-	for _, key := range keys {
-		var until int64
-		err = tx.QueryRowContext(ctx, "SELECT locked_until FROM local_login_attempts WHERE attempt_key=?", key).Scan(&until)
-		if err == nil && until > current {
-			return true, tx.Commit()
+	maxWindow := time.Duration(0)
+	for _, entry := range keys {
+		if entry.Key == "" || entry.Policy.Limit <= 0 || entry.Policy.Window <= 0 {
+			return "", true, ErrDenied
 		}
+		if entry.Policy.Window > maxWindow {
+			maxWindow = entry.Policy.Window
+		}
+	}
+	// Preserve the old pre-check cleanup; without it, one-off failures for
+	// retired usernames would fill the table and fail every login closed.
+	if _, err = tx.ExecContext(ctx, "DELETE FROM local_login_attempts WHERE locked_until<=? AND window_start<=?", current, current-int64(maxWindow/time.Second)); err != nil {
+		return "", true, err
+	}
+	for _, entry := range keys {
+		failures, start, until := int64(0), current, int64(0)
+		err = tx.QueryRowContext(ctx, "SELECT failures,window_start,locked_until FROM local_login_attempts WHERE attempt_key=?", entry.Key).Scan(&failures, &start, &until)
 		if err != nil && err != sql.ErrNoRows {
-			return true, err
+			return "", true, err
+		}
+		if err == sql.ErrNoRows || start+int64(entry.Policy.Window/time.Second) <= current {
+			failures, start, until = 0, current, 0
+		}
+		if until > current {
+			return "", true, tx.Commit()
+		}
+		var reserved int64
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM local_login_reservations WHERE attempt_key=? AND created_at>?", entry.Key, oldest).Scan(&reserved); err != nil {
+			return "", true, err
+		}
+		if failures+reserved >= int64(entry.Policy.Limit) {
+			return "", true, tx.Commit()
 		}
 	}
 	var total int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM local_login_attempts").Scan(&total); err != nil {
-		return true, err
-	}
-	if err = tx.Commit(); err != nil {
-		return true, err
+	if err = tx.QueryRowContext(ctx, "SELECT (SELECT count(*) FROM local_login_attempts)+(SELECT count(*) FROM local_login_reservations)").Scan(&total); err != nil {
+		return "", true, err
 	}
 	if total >= LoginAttemptCapacity {
-		return true, ErrAttemptCapacity
+		return "", true, ErrAttemptCapacity
 	}
-	return false, nil
+	reservation, err := newLoginReservationID()
+	if err != nil {
+		return "", true, err
+	}
+	for _, entry := range keys {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO local_login_reservations(reservation_id,attempt_key,created_at) VALUES(?,?,?)", reservation, entry.Key, current); err != nil {
+			return "", true, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return "", true, err
+	}
+	return reservation, false, nil
+}
+
+// ReleaseLoginAttempt drops a claim after its verification finished, whether
+// it succeeded or failed. Failures themselves are recorded separately.
+func (s *Store) ReleaseLoginAttempt(ctx context.Context, reservation string) error {
+	if reservation == "" {
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx, "DELETE FROM local_login_reservations WHERE reservation_id=?", reservation)
+	return err
+}
+
+func newLoginReservationID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value[:]), nil
 }
 
 // RecordLoginFailure counts one failure and reports whether the key locked now.
@@ -259,8 +345,10 @@ func (s *Store) ClearLoginFailures(ctx context.Context, key string) error {
 	return err
 }
 
-// StartLocalSession stores only the token digest and audits the sign-in.
-func (s *Store) StartLocalSession(ctx context.Context, p Principal, tokenHash string, now, expires time.Time) error {
+// StartLocalSession stores only the token digest and audits the sign-in. The
+// verified password hash is part of the insert, so a password change between
+// verification and this call cannot create a session for the old credential.
+func (s *Store) StartLocalSession(ctx context.Context, p Principal, verifiedHash, tokenHash string, now, expires time.Time) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -269,15 +357,21 @@ func (s *Store) StartLocalSession(ctx context.Context, p Principal, tokenHash st
 	if _, err = tx.ExecContext(ctx, "DELETE FROM local_sessions WHERE expires_at<=?", now.Unix()); err != nil {
 		return err
 	}
-	var enabled int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM lab_principals WHERE id=? AND issuer=? AND enabled=1", p.ID, LocalIssuer).Scan(&enabled); err != nil {
+	result, err := tx.ExecContext(ctx, `INSERT INTO local_sessions(token_hash,principal_id,created_at,last_seen_at,expires_at)
+SELECT ?,p.id,?,?,? FROM lab_principals p JOIN local_accounts a ON a.principal_id=p.id
+WHERE p.id=? AND p.issuer=? AND p.enabled=1 AND a.password_hash=?`, tokenHash, now.Unix(), now.Unix(), expires.Unix(), p.ID, LocalIssuer, verifiedHash)
+	if err != nil {
 		return err
 	}
-	if enabled != 1 {
-		return ErrDenied
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO local_sessions VALUES(?,?,?,?,?)", tokenHash, p.ID, now.Unix(), now.Unix(), expires.Unix()); err != nil {
-		return err
+	if created, _ := result.RowsAffected(); created != 1 {
+		var enabled int
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM lab_principals WHERE id=? AND issuer=? AND enabled=1", p.ID, LocalIssuer).Scan(&enabled); err != nil {
+			return err
+		}
+		if enabled != 1 {
+			return ErrDenied
+		}
+		return ErrLocalConflict
 	}
 	if _, err = tx.ExecContext(ctx, "UPDATE local_accounts SET last_login_at=? WHERE principal_id=?", now.UTC().Format(time.RFC3339), p.ID); err != nil {
 		return err

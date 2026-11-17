@@ -7,6 +7,7 @@ package updater
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -25,6 +26,27 @@ import (
 	"syscall"
 	"time"
 )
+
+const (
+	// maxManifestBytes bounds manifest.json itself. The real one is a few
+	// kilobytes; the allowance also covers the detached signature file.
+	maxManifestBytes = 1 << 20
+	// maxExtractBytes is the absolute ceiling for one release, independent of
+	// what the signed manifest claims.
+	maxExtractBytes = 1 << 30
+	// maxExtractEntries stops an archive full of empty entries from consuming
+	// inodes without consuming the byte budget.
+	maxExtractEntries = 10000
+)
+
+type releaseManifest struct {
+	Version string `json:"version"`
+	Files   []struct {
+		Path   string `json:"path"`
+		Bytes  int64  `json:"bytes"`
+		SHA256 string `json:"sha256"`
+	} `json:"files"`
+}
 
 type Options struct {
 	DataDir        string
@@ -62,12 +84,30 @@ func Apply(ctx context.Context, options Options) error {
 	if err := verifyArchive(options.Package, options.SHA256); err != nil {
 		return err
 	}
+	// The signed manifest is the only authority for what may be extracted.
+	// Read and verify it before writing any archive entry, so an unsigned or
+	// forged package cannot consume disk.
+	manifest, err := readArchiveManifest(options.Package)
+	if err != nil {
+		return err
+	}
+	if err = verifyManifestSignature(manifest, options); err != nil {
+		return err
+	}
+	_, _, total, err := decodeReleaseManifest(manifest, options.Version)
+	if err != nil {
+		return err
+	}
+	budget := total + 2*maxManifestBytes
+	if budget < total || budget > maxExtractBytes {
+		budget = maxExtractBytes
+	}
 	staging, err := os.MkdirTemp("", "custodia-update-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	if err = extract(options.Package, staging); err != nil {
+	if err = extract(options.Package, staging, budget); err != nil {
 		return err
 	}
 	packageDir, err := findPackage(staging)
@@ -266,7 +306,63 @@ func verifyArchive(path, expected string) error {
 	return nil
 }
 
-func extract(archive, destination string) error {
+// readArchiveManifest scans the compressed archive for the top-level
+// manifest.json without writing anything. The scan is bounded so a gzip bomb
+// cannot turn this pre-check into its own denial of service.
+func readArchiveManifest(archive string) ([]byte, error) {
+	file, err := os.Open(archive)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer gzipReader.Close()
+	bounded := &io.LimitedReader{R: gzipReader, N: maxExtractBytes + 1}
+	reader := tar.NewReader(bounded)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			if bounded.N <= 0 {
+				return nil, errors.New("release archive exceeds the extraction limit")
+			}
+			return nil, err
+		}
+		name := filepath.Clean(header.Name)
+		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+			return nil, errors.New("release archive contains an unsafe path")
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(name), "/")
+		if len(parts) != 2 || parts[1] != "manifest.json" {
+			continue
+		}
+		if header.Size < 0 || header.Size > maxManifestBytes {
+			return nil, errors.New("release manifest is too large")
+		}
+		manifest := make([]byte, header.Size)
+		if _, err = io.ReadFull(reader, manifest); err != nil {
+			return nil, err
+		}
+		return manifest, nil
+	}
+	if bounded.N <= 0 {
+		return nil, errors.New("release archive exceeds the extraction limit")
+	}
+	return nil, errors.New("release archive has no package manifest")
+}
+
+func extract(archive, destination string, budget int64) error {
+	if budget <= 0 || budget > maxExtractBytes {
+		budget = maxExtractBytes
+	}
 	file, err := os.Open(archive)
 	if err != nil {
 		return err
@@ -278,6 +374,8 @@ func extract(archive, destination string) error {
 	}
 	defer gzipReader.Close()
 	reader := tar.NewReader(gzipReader)
+	remaining := budget
+	entries := 0
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
@@ -285,6 +383,10 @@ func extract(archive, destination string) error {
 		}
 		if err != nil {
 			return err
+		}
+		entries++
+		if entries > maxExtractEntries {
+			return errors.New("release archive contains too many entries")
 		}
 		name := filepath.Clean(header.Name)
 		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
@@ -297,6 +399,9 @@ func extract(archive, destination string) error {
 				return err
 			}
 		case tar.TypeReg:
+			if header.Size < 0 || header.Size > remaining {
+				return errors.New("release archive exceeds the extraction budget")
+			}
 			if err = os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -304,11 +409,18 @@ func extract(archive, destination string) error {
 			if err != nil {
 				return err
 			}
-			if _, err = io.Copy(out, io.LimitReader(reader, 1<<30)); err != nil {
-				out.Close()
-				return err
+			copied, copyErr := io.CopyN(out, reader, header.Size)
+			closeErr := out.Close()
+			if copyErr != nil {
+				return copyErr
 			}
-			out.Close()
+			if closeErr != nil {
+				return closeErr
+			}
+			if copied != header.Size {
+				return errors.New("release archive entry is truncated")
+			}
+			remaining -= copied
 		default:
 			return errors.New("release archive contains a non-regular entry")
 		}
@@ -354,45 +466,64 @@ func checkTrustAnchor(path string) error {
 	return nil
 }
 
+func verifyManifestSignature(manifest []byte, options Options) error {
+	command := exec.Command("ssh-keygen", "-Y", "verify", "-f", options.AllowedSigners, "-I", "custodia-release", "-n", "custodia-release", "-s", options.Signature)
+	command.Stdin = bytes.NewReader(manifest)
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("release signature rejected: %s", strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// decodeReleaseManifest validates the signed manifest's file list and returns
+// its total size. It runs before extraction so the signature bounds what may
+// be written, not just what may be installed.
+func decodeReleaseManifest(manifest []byte, version string) (releaseManifest, map[string]bool, int64, error) {
+	var decoded releaseManifest
+	if err := json.Unmarshal(manifest, &decoded); err != nil {
+		return decoded, nil, 0, err
+	}
+	if decoded.Version != version {
+		return decoded, nil, 0, errors.New("release manifest version mismatch")
+	}
+	if len(decoded.Files) == 0 {
+		return decoded, nil, 0, errors.New("release manifest lists no files")
+	}
+	listed := map[string]bool{}
+	var total int64
+	for _, file := range decoded.Files {
+		name := filepath.Clean(filepath.FromSlash(file.Path))
+		if file.Path == "" || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) || listed[name] || name == "manifest.json" || name == "manifest.json.sig" || file.Bytes < 0 {
+			return decoded, nil, 0, errors.New("release manifest lists an unsafe, reserved or duplicated path")
+		}
+		if file.Bytes > maxExtractBytes-total {
+			return decoded, nil, 0, errors.New("release manifest exceeds the extraction limit")
+		}
+		listed[name] = true
+		total += file.Bytes
+	}
+	return decoded, listed, total, nil
+}
+
 func verifyManifest(packageDir string, options Options) error {
 	manifest, err := os.ReadFile(filepath.Join(packageDir, "manifest.json"))
 	if err != nil {
 		return err
 	}
-	command := exec.Command("ssh-keygen", "-Y", "verify", "-f", options.AllowedSigners, "-I", "custodia-release", "-n", "custodia-release", "-s", options.Signature)
-	command.Stdin = strings.NewReader(string(manifest))
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("release signature rejected: %s", strings.TrimSpace(string(output)))
-	}
-	var decoded struct {
-		Version string `json:"version"`
-		Files   []struct {
-			Path   string `json:"path"`
-			Bytes  int64  `json:"bytes"`
-			SHA256 string `json:"sha256"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(manifest, &decoded); err != nil {
+	if err = verifyManifestSignature(manifest, options); err != nil {
 		return err
 	}
-	if decoded.Version != options.Version {
-		return errors.New("release manifest version mismatch")
+	decoded, listed, _, err := decodeReleaseManifest(manifest, options.Version)
+	if err != nil {
+		return err
 	}
 	// The signature covers manifest.json only, so the signed manifest must be
 	// authoritative for every extracted file: each listed file must exist with
 	// its size and digest, and nothing unlisted may be installed. The files
 	// were extracted into a private root-owned directory, so what is checked
 	// here is exactly what will be copied.
-	if len(decoded.Files) == 0 {
-		return errors.New("release manifest lists no files")
-	}
-	listed := map[string]bool{}
 	for _, file := range decoded.Files {
 		name := filepath.Clean(filepath.FromSlash(file.Path))
-		if file.Path == "" || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) || listed[name] {
-			return errors.New("release manifest lists an unsafe or duplicated path")
-		}
-		listed[name] = true
 		digest, size, err := fileDigest(filepath.Join(packageDir, name))
 		if err != nil {
 			return fmt.Errorf("release file %s: %w", file.Path, err)
