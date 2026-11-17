@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        run: npm ci --prefix web
+      - name: Check types
+        run: npm --prefix web run typecheck
+      - name: Lint
+        run: npm --prefix web run lint
+      - name: Check styles
+        run: npm --prefix web run verify:styles
+      - name: Unit tests
+        run: npm --prefix web run test:unit
+      - name: Build production web
+        run: npm --prefix web run build
+      - name: Build public demo
+        run: npm --prefix web run build:demo
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm --prefix web run test:e2e
+      - name: Keep browser failure traces
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failures-${{ matrix.os }}
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  backend:
+    name: Backend / Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify Go and scan dependencies
+        run: npm run verify:go
+      - name: Install web dependencies
+        run: npm ci --prefix web
+      - name: Check documentation and models
+        run: npm run verify
+      - name: Check production bundle
+        run: npm run verify:build:core
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Local login against Go and SQLite
+        run: npm run verify:go:local
+      - name: Verify packaged backup and restore
+        run: npm run verify:go:ops
+      - name: Verify installer
+        run: npm run verify:go:install
+      - name: Verify update and rollback
+        run: npm run verify:go:update

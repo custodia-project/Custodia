@@ -1,7 +1,7 @@
 ---
 estado: vigente
 dueño: Octavio Santacruz
-revisado: 2026-11-13
+revisado: 2026-11-17
 ---
 
 # Custodia web: el frontend de DS Hub, abierto
@@ -17,6 +17,20 @@ propia del 22/10 se retiró y queda en Git (`617f460`).
 | `web/` | La app: shell, inicio con la rueda de fuentes, Personas, CyberArk, Netskope, Ayuda. React + Vite + TypeScript | Proyecto de Pages `custodia-demo` |
 | `site/` | Sitio de producto en inglés (`/`) y español (`/es/`), generado desde `site/site/` | Proyecto de Pages `custodia` |
 | `demo/` | Experimento reducido anterior | No se publica |
+
+## Verificación en Linux y Windows
+
+El workflow [CI](../.github/workflows/ci.yml) configura la web con Node.js 24
+en Ubuntu y Windows: tipos, lint, estilos, unitarias, builds de producción y
+demo, y e2e con Chromium. Los comandos de build usan Node y funcionan sin
+asignaciones de variables específicas de Bash. Se ejecuta con cada push,
+pull request o manualmente desde Actions una vez incorporado a GitHub.
+
+El backend se verifica sólo en Linux: Go toma la versión de `server/go.mod`,
+ejecuta vet, pruebas con detector de carreras, build y govulncheck; además se
+verifican ingreso local, paquete/backup/restore, instalador y actualización con
+rollback en entornos descartables. Esta matriz no declara soporte de
+instalación del servidor en Windows ni publica releases.
 
 ## Dos modos de la app
 

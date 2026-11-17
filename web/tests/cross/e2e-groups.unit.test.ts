@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import test from 'node:test';
 
 import { E2E_GROUPS, groupFilters } from '../../scripts/e2e-groups.mjs';
 
 const specDir = resolve(import.meta.dirname, '../e2e');
-const specs = readdirSync(specDir, { recursive: true }).filter((file) => file.endsWith('.spec.ts')).sort();
+const specs = readdirSync(specDir, { recursive: true })
+  .filter((file) => file.endsWith('.spec.ts'))
+  .map((file) => file.split(sep).join('/'))
+  .sort();
 
 test('every E2E spec belongs to exactly one platform group', () => {
   const listed = Object.values(E2E_GROUPS).flat();

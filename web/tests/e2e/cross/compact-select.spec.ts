@@ -31,7 +31,14 @@ test('CompactSelect keeps the Custodia trigger and menu geometry', async ({ page
   await menu.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)));
   const menuBox = await menu.boundingBox();
   // Same offset (5px) and minimum width (max(150px, trigger)) as before.
-  expect(Math.abs(menuBox!.y - (triggerBox!.y + triggerBox!.height + 5))).toBeLessThan(2);
+  // The drawer can still move the trigger after its initial measurement;
+  // let the popover's positioning observer catch up, then compare live boxes.
+  await expect.poll(async () => {
+    const currentTrigger = await trigger.boundingBox();
+    const currentMenu = await menu.boundingBox();
+    if (!currentTrigger || !currentMenu) return Number.POSITIVE_INFINITY;
+    return Math.abs(currentMenu.y - (currentTrigger.y + currentTrigger.height + 5));
+  }).toBeLessThan(2);
   expect(menuBox!.width).toBeGreaterThanOrEqual(Math.max(150, triggerBox!.width) - 1);
 
   const menuStyles = await menu.evaluate((element) => {

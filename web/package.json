@@ -33,7 +33,7 @@
     "dev": "vite",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "lint": "oxlint --report-unused-disable-directives src",
-    "build": "npm run typecheck && vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "test:unit": "node scripts/unit-tests.mjs",
     "generate:chains-types": "node scripts/generate-chains-types.mjs",
@@ -43,8 +43,8 @@
     "test:e2e:cyberark": "node scripts/e2e-groups.mjs cyberark",
     "test:e2e:netskope": "node scripts/e2e-groups.mjs netskope",
     "test:e2e:cross": "node scripts/e2e-groups.mjs cross",
-    "build:demo": "VITE_DEMO=1 npm run build",
-    "build:all": "VITE_FULL=1 npm run build",
+    "build:demo": "node scripts/build.mjs --demo",
+    "build:all": "node scripts/build.mjs --all",
     "preview:demo": "npm run build:demo && vite preview"
   },
   "overrides": {

@@ -1,0 +1,2 @@
+# Keep source files identical on Linux and Windows, including test fixtures.
+* text=auto eol=lf
