@@ -161,7 +161,12 @@ a.button { text-decoration: none; }
 .hero-install-label { color: var(--ink-900); font-size: var(--t-sm); font-weight: 600; margin-bottom: var(--s-2); }
 .hero-install-note { color: var(--ink-600); font-size: var(--t-xs); margin-top: var(--s-2); }
 .hero-install-note a { color: var(--ink-900); }
-.install-preview { background: transparent; border: 1px dashed var(--ink-400); border-radius: var(--r-md); color: var(--ink-700); font-family: var(--font-data); font-size: var(--t-xs); line-height: 1.7; margin: 0; max-width: 100%; overflow-x: auto; padding: var(--s-3) var(--s-4); white-space: pre; }
+.install-preview { background: transparent; border: 1px dashed var(--ink-400); border-radius: var(--r-md); color: var(--ink-700); font-family: var(--font-data); font-size: var(--t-xs); line-height: 1.7; margin: 0; max-width: 100%; overflow-x: auto; padding: var(--s-3) var(--s-4); white-space: pre-wrap; }
+/* Salida de terminal: puede cortar línea; los comandos (.install-code) nunca. */
+.install-preview .t-dim { color: var(--ink-600); }
+.install-preview .t-in { color: var(--brand); }
+.install-preview .t-ok { color: var(--ink-900); }
+.install-preview .t-key { color: var(--ink-900); font-weight: 700; }
 .install-preview code { color: inherit; font-size: inherit; }
 .install-note { border: 1px solid var(--ink-400); border-left: 3px solid var(--brand); border-radius: var(--r-md); color: var(--ink-700); font-size: var(--t-sm); line-height: 1.6; margin-top: var(--s-5); max-width: 72ch; padding: var(--s-3) var(--s-4); }
 .install-note strong { color: var(--ink-900); }
@@ -169,12 +174,14 @@ a.button { text-decoration: none; }
 .install-steps { counter-reset: step; display: grid; gap: var(--s-5); list-style: none; padding: 0; }
 .install-steps li { counter-increment: step; min-width: 0; }
 .install-steps p { color: var(--ink-700); font-size: var(--t-sm); line-height: 1.6; margin-bottom: var(--s-2); }
+.install-steps .install-code.is-primary { font-size: var(--t-xs); }
 .install-steps p::before { color: var(--ink-900); content: counter(step) ". "; font-family: var(--font-data); font-weight: 700; }
 .install-code { background: var(--ink-100); border: 1px solid var(--ink-300); border-radius: var(--r-md); color: var(--ink-900); font-family: var(--font-data); font-size: var(--t-xs); line-height: 1.7; margin: 0; max-width: 100%; overflow-x: auto; padding: var(--s-3) var(--s-4); white-space: pre; }
 .install-code code { color: inherit; font-size: inherit; }
-.install-code-wrap { align-items: stretch; display: flex; gap: var(--s-2); min-width: 0; }
-.install-code-wrap .install-code { flex: 1; min-width: 0; }
-.install-copy { align-self: flex-start; background: var(--ink-150); border: 1px solid var(--ink-400); border-radius: var(--r-sm); color: var(--ink-900); cursor: pointer; flex: none; font-family: var(--font-data); font-size: var(--t-xs); min-height: 32px; padding: 4px 10px; }
+/* El botón va dentro del bloque, así el comando usa todo el ancho. */
+.install-code-wrap { min-width: 0; position: relative; }
+.install-code-wrap .install-code { padding-right: 76px; }
+.install-copy { position: absolute; right: 6px; top: 6px; background: var(--ink-150); border: 1px solid var(--ink-400); border-radius: var(--r-sm); color: var(--ink-900); cursor: pointer; flex: none; font-family: var(--font-data); font-size: var(--t-xs); min-height: 32px; padding: 4px 10px; }
 .install-copy:hover { border-color: var(--ink-700); }
 .install-copy:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .install-code.is-primary { border-color: var(--brand); font-size: var(--t-sm); }
@@ -252,7 +259,14 @@ a.button { text-decoration: none; }
 .article-body p, .article-body li { color: var(--ink-700); font-size: var(--t-md); line-height: 1.75; }
 .article-body p { margin-top: var(--s-4); }
 .article-body ul, .article-body ol { display: grid; gap: var(--s-2); margin-top: var(--s-4); padding-left: 1.25em; }
-.article-body li::marker { color: var(--ink-600); }
+/* Marcadores en articles.css; acá sólo el espacio para «10.» y que un bloque
+   de código no ensanche la página en móvil. */
+.article-body ol { padding-left: 1.75em; }
+.article-body li { min-width: 0; }
+.article-body .install-preview, .article-body .install-code-wrap { margin-top: var(--s-4); }
+/* Flags y rutas en la primera columna: nunca en mayúsculas, el caso importa. */
+.article-body .table th code { color: var(--ink-900); font-size: var(--t-xs); letter-spacing: normal; text-transform: none; }
+.article-body .table.is-flags th code { white-space: nowrap; }
 .article-body strong { color: var(--ink-900); }
 .article-body a { color: var(--ink-900); text-decoration-color: var(--ink-400); text-underline-offset: 3px; }
 .article-body a:hover { color: var(--brand); text-decoration-color: var(--brand); }
