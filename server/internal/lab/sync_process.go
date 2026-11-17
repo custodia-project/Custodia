@@ -8,6 +8,7 @@ import (
 
 	"custodia/server/internal/adapters/cyberarkpam"
 	"custodia/server/internal/adapters/httpinventory"
+	"custodia/server/internal/adapters/wazuh"
 	"custodia/server/internal/probe"
 	inventorysync "custodia/server/internal/sync"
 )
@@ -44,7 +45,7 @@ func (s *Store) processClaimedSyncRun(ctx context.Context, run SyncRun, workerID
 			Status: "failed", ErrorCode: "configuration", ErrorDetail: "sync source is not available",
 		}, now())
 	}
-	client, err := newSyncAdapter(ctx, source)
+	client, err := s.newSyncAdapter(ctx, source)
 	if err != nil {
 		return s.finishSyncRun(finishCtx, run.RunID, workerID, run.AttemptCount, syncResult{
 			Status: "failed", ErrorCode: "configuration", ErrorDetail: "sync source configuration is invalid",
@@ -78,7 +79,7 @@ func (s *Store) processClaimedSyncRun(ctx context.Context, run SyncRun, workerID
 // newSyncAdapter selects the contract from the registered connector. The
 // worker never probes a provider or invents an endpoint: an unknown connector
 // fails the run before any request.
-func newSyncAdapter(ctx context.Context, source SyncSource) (inventorysync.Source, error) {
+func (s *Store) newSyncAdapter(ctx context.Context, source SyncSource) (inventorysync.Source, error) {
 	switch source.Connector {
 	case syncConnector:
 		return httpinventory.New(source.BaseURL, httpinventory.Options{})
@@ -91,7 +92,7 @@ func newSyncAdapter(ctx context.Context, source SyncSource) (inventorysync.Sourc
 			if err != nil {
 				return nil, err
 			}
-			client, err := probe.Prepare(ctx, plan)
+			client, err := probe.PrepareWithResolver(ctx, plan, func(reference string) (string, error) { return s.ResolveReference(ctx, source.GroupID, reference) })
 			if err != nil {
 				return nil, err
 			}
@@ -99,6 +100,21 @@ func newSyncAdapter(ctx context.Context, source SyncSource) (inventorysync.Sourc
 			options.AllowRemote = true
 		}
 		return cyberarkpam.New(source.BaseURL, options)
+	case syncConnectorWazuh:
+		options := wazuh.Options{}
+		if strings.HasPrefix(source.BaseURL, "https://") || normalizedAuthMode(source.AuthMode) != "none" {
+			plan, err := source.ProbePlan()
+			if err != nil {
+				return nil, err
+			}
+			client, err := probe.PrepareWithResolver(ctx, plan, func(reference string) (string, error) { return s.ResolveReference(ctx, source.GroupID, reference) })
+			if err != nil {
+				return nil, err
+			}
+			options.HTTP = client
+			options.AllowRemote = true
+		}
+		return wazuh.New(source.BaseURL, options)
 	default:
 		return nil, fmt.Errorf("unsupported sync connector")
 	}

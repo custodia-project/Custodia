@@ -1087,7 +1087,10 @@ for (const authMode of ['local', 'hybrid', 'oidc'] as const) {
     await mockAuthenticatedApp(page, { authMode, onRequest: (path) => requests.push(path) });
     await page.goto('/admin/access');
     const tabs = page.getByRole('tablist', { name: 'Administración de acceso' });
-    await expect(tabs.getByRole('tab')).toHaveCount(2);
+    // Users, access review and roles are the three real tabs since the base
+    // frontend. The test guards that OIDC diagnostics never become a fourth.
+    await expect(tabs.getByRole('tab')).toHaveCount(3);
+    await expect(tabs.getByRole('tab', { name: /Revisión de accesos/ })).toBeVisible();
     await expect(tabs.getByRole('tab', { name: /Diagnóstico OIDC/ })).toHaveCount(0);
     await tabs.getByRole('tab', { name: /Roles y permisos/ }).click();
     await expect(page.getByRole('heading', { name: 'Roles y permisos' })).toBeVisible();

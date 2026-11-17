@@ -19,7 +19,7 @@ for (const entry of ENTRIES) {
 }
 
 export function workspacePath(view: WorkspaceView): string {
-  return WORKSPACE_PATHS[view];
+  return WORKSPACE_PATHS[view] ?? '/';
 }
 
 export function workspaceFromPath(pathname: string): WorkspaceView | null {
@@ -47,6 +47,7 @@ const WORKSPACE_ALTERNATE_PERMISSIONS = catalogValues((entry) => {
    access:manage deliberately does not bypass it. */
 export function hasWorkspaceAccess(view: WorkspaceView, permissions: string[]): boolean {
   const entry = CATALOG_BY_ID[view];
+  if (!entry) return false;
   if (entry.gate === 'open') return true;
   const alternates = WORKSPACE_ALTERNATE_PERMISSIONS[view];
   if (entry.gate === 'strict') {
@@ -66,7 +67,8 @@ export function hasWorkspaceAccess(view: WorkspaceView, permissions: string[]): 
    there against the switcher's now-shorter available list). Same for any
    SIA subview (Recursos/Cobertura sources), which now record "SIA". */
 export function canonicalRecentWorkspace(view: WorkspaceView): WorkspaceView {
-  return (CATALOG_BY_ID[view].recentWorkspace as WorkspaceView | undefined) ?? view;
+  const entry = CATALOG_BY_ID[view];
+  return (entry?.recentWorkspace as WorkspaceView | undefined) ?? view;
 }
 
 export function canonicalWorkspaceList(views: WorkspaceView[]): WorkspaceView[] {

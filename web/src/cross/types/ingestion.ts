@@ -81,6 +81,23 @@ export type ConnectorDescriptor = {
   notes: string;
 };
 
+export type ConnectionProbeSummary = { at: string; ok: boolean; detail: string };
+
+export type ConnectionGroup = {
+  group_id: string;
+  connector: string;
+  base_url: string;
+  collections: string[];
+  auth_mode: string;
+  enabled: boolean;
+  retired_at: string;
+  interval_minutes: number;
+  credential_configured: boolean;
+  secret_configured: boolean;
+  secret_version: number;
+  last_probe: ConnectionProbeSummary | null;
+};
+
 export type TenantConnection = {
   connection_id: string;
   group_id?: string;

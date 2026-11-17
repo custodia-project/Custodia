@@ -8,7 +8,9 @@ export type ConnectionForm = {
   collections: string[];
   scope: string;
   authMode: string;
+  authUser: string;
   credentialRef: string;
+  secret: string;
   tokenUrl: string;
   clientIdRef: string;
   clientSecretRef: string;
@@ -25,7 +27,9 @@ export type ConnectionRequest = {
   collections: string[];
   scope: string;
   auth_mode: string;
+  auth_user?: string;
   credential_ref?: string;
+  secret?: string;
   token_url?: string;
   client_id_ref?: string;
   client_secret_ref?: string;
@@ -45,7 +49,9 @@ export function emptyConnectionForm(descriptor?: ConnectorDescriptor): Connectio
     collections: descriptor?.collections.length ? [descriptor.collections[0]] : [],
     scope: '',
     authMode: descriptor?.auth_modes[0] ?? '',
+    authUser: '',
     credentialRef: '',
+    secret: '',
     tokenUrl: '',
     clientIdRef: '',
     clientSecretRef: '',
@@ -98,8 +104,14 @@ export function buildConnectionRequest(form: ConnectionForm, descriptor: Connect
   if (!descriptor.auth_modes.includes(form.authMode)) {
     errors.push('Elegí un modo de autenticación soportado.');
   }
-  if (form.authMode === 'bearer' && !isReference(form.credentialRef)) {
-    errors.push('La credencial debe ser una referencia env:, file: o secret:.');
+  if (form.authMode === 'bearer' && !isReference(form.credentialRef) && !form.secret.trim()) {
+    errors.push('Cargá un secreto o una referencia env:, file: o secret:.');
+  }
+  if (form.authMode === 'bearer' && isReference(form.credentialRef) && form.secret.trim()) {
+    errors.push('Usá un secreto o una referencia, no ambos.');
+  }
+  if (form.secret.length > 4096 || /[\r\n\x00]/.test(form.secret)) {
+    errors.push('El secreto debe ser una sola línea de hasta 4096 caracteres.');
   }
   if (form.authMode === 'oauth-client-credentials') {
     try {
@@ -133,7 +145,11 @@ export function buildConnectionRequest(form: ConnectionForm, descriptor: Connect
     auth_mode: form.authMode,
     interval_minutes: interval,
   };
-  if (form.authMode === 'bearer') request.credential_ref = form.credentialRef.trim();
+  if (form.authMode === 'bearer' || form.authMode === 'basic-exchange') {
+    if (form.secret.trim()) request.secret = form.secret;
+    else request.credential_ref = form.credentialRef.trim();
+    if (form.authMode === 'basic-exchange') request.auth_user = form.authUser.trim();
+  }
   if (form.authMode === 'oauth-client-credentials') {
     request.token_url = form.tokenUrl.trim();
     request.client_id_ref = form.clientIdRef.trim();

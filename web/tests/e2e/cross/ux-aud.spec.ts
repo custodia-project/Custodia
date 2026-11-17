@@ -556,12 +556,14 @@ test('UX-AUD2-024: Activity tabs use the compact navigation typography and syste
   await mockAuthenticatedApp(page);
   await page.goto('/admin/activity');
   const tabs = page.getByRole('tablist', { name: 'Actividad administrativa' });
-  await expect(tabs.getByRole('tab')).toHaveCount(5);
+  // Actividad, Sincronizaciones, Agenda, Conexiones, Logs operativos and Errores.
+  await expect(tabs.getByRole('tab')).toHaveCount(6);
+  await expect(tabs.getByRole('tab', { name: 'Conexiones', exact: true })).toBeVisible();
   const sizes = await tabs.getByRole('tab').evaluateAll((nodes) => nodes.map((node) => {
     const label = node.querySelector('strong') ?? node;
     return parseFloat(getComputedStyle(label).fontSize);
   }));
-  expect(sizes).toHaveLength(5);
+  expect(sizes).toHaveLength(6);
   expect(sizes.every((size) => size <= 12)).toBe(true);
   for (const section of [
     { tab: 'Actividad', search: 'Buscar actividad por actor, Safe o entidad' },

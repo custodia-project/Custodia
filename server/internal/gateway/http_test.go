@@ -167,7 +167,7 @@ func TestOzalModeRejectsLocalSessions(t *testing.T) {
 	if err = s.Seed(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateLocalAdministrator(ctx, "opaque-admin", "Local Admin", "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g", []string{lab.IdentityConnection}, now); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "opaque-admin", "Local Admin", "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g", []string{lab.IdentityConnection}, false, now); err != nil {
 		t.Fatal(err)
 	}
 	local, err := s.LocalCredential(ctx, "opaque-admin")

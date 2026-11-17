@@ -1,0 +1,11 @@
+.system-workspace { background: var(--bg-panel); border: 1px solid var(--border-soft); padding-bottom: 18px; }
+.system-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 8px 18px 14px; }
+.system-grid article { background: var(--bg-subtle); border: 1px solid var(--border-soft); display: grid; gap: 4px; padding: 10px 12px; }
+.system-grid span { color: var(--text-muted); font-size: 10px; letter-spacing: .03em; text-transform: uppercase; }
+.system-grid strong { color: var(--text-primary); font-size: 15px; overflow-wrap: anywhere; }
+.system-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; padding: 0 18px 10px; }
+.system-workspace .database-caption { align-items: center; display: flex; gap: 6px; padding: 0 18px; }
+.system-section { border-top: 1px solid var(--border-soft); margin-top: 8px; padding: 14px 18px 0; }
+.system-section header { align-items: flex-start; display: flex; gap: 12px; justify-content: space-between; margin-bottom: 8px; }
+.system-section h3 { font-size: 14px; margin: 0 0 4px; }
+.system-section table { width: 100%; }

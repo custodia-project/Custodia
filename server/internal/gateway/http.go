@@ -49,6 +49,15 @@ func NewHandler(store *lab.Store, config Config, now func() time.Time, files htt
 			w.WriteHeader(code)
 			json.NewEncoder(w).Encode(map[string]string{"detail": message})
 		}
+		if r.URL.Path == "/api/health" && r.Method == "GET" {
+			version := config.Version
+			if version == "" {
+				version = "dev"
+			}
+			w.WriteHeader(200)
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "version": version, "mode": "ozal"})
+			return
+		}
 		token, err := assertionHeader(r)
 		if err != nil {
 			send(401, "Identidad verificada de Ozal requerida.")

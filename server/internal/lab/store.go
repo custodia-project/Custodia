@@ -4,6 +4,7 @@ package lab
 import (
 	"context"
 	"custodia/server/internal/coverage"
+	"custodia/server/internal/secrets"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -44,7 +45,10 @@ type Company struct {
 	Devices []Device `json:"devices"`
 }
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB        *sql.DB
+	masterKey *secrets.Key
+}
 
 func Open(path string) (*Store, error) {
 	if path == "" {
@@ -70,7 +74,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{db}, nil
+	return &Store{DB: db}, nil
 }
 
 // Migrate is explicit; serving never creates or migrates a database.
@@ -129,6 +133,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return err
 	}
 	if err = migrateOIDC(ctx, tx); err != nil {
+		return err
+	}
+	if err = migrateConnectionSecrets(ctx, tx); err != nil {
+		return err
+	}
+	if err = migrateWazuhAuth(ctx, tx); err != nil {
 		return err
 	}
 	return tx.Commit()

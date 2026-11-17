@@ -7,7 +7,7 @@ import { WORKSPACE_DESCRIPTIONS } from '../../src/cross/lib/workspace-registry.t
 
 test('tool navigation keeps PAM analysis separate from platform administration', () => {
   assert.deepEqual(domainWorkspaces('cross'), ['person', 'help', 'inventory']);
-  assert.deepEqual(domainWorkspaces('admin'), ['users', 'activity']);
+  assert.deepEqual(domainWorkspaces('admin'), ['users', 'activity', 'system']);
   assert.equal(domainOf('posture'), 'pam');
   assert.equal(domainOf('graph'), 'pam');
   assert.equal(workspacePath('platforms'), '/pam/platforms');

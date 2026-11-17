@@ -47,6 +47,8 @@ try {
 
   browser = await chromium.launch();
   const admin = await (await browser.newContext({ locale: 'es-AR' })).newPage();
+  admin.on('pageerror', (error) => console.error('PAGEERROR', error.message));
+  admin.on('console', (message) => { if (message.type() === 'error') console.error('CONSOLE', message.text().slice(0, 500)); });
   await admin.goto(origin + '/');
   await expect(admin.getByRole('heading', { name: 'Iniciar sesión' })).toBeVisible();
   await admin.getByRole('textbox', { name: 'Usuario', exact: true }).fill('ada.admin');

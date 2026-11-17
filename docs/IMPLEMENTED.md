@@ -6,6 +6,197 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Actualización firmada con backup y rollback — 17/11
+
+`PROD-UPDATE-001`: `custodia update` verifica el SHA-256 del archivo y la firma
+OpenSSH del manifiesto, exige la versión esperada, copia la base a
+`state.db.update-backup`, respalda binario y web, reemplaza de forma atómica,
+ejecuta la migración explícita con el binario nuevo y comprueba
+`/api/health`. Si algo falla, restaura binario, web y base antes de devolver
+el error.
+
+La consola (`Sistema`) muestra la versión actual y la disponible del manifiesto
+firmado; `POST /api/system/update` escribe una solicitud en
+`.update/request.json` como usuario de servicio. El oneshot root
+`custodia-update.service`, disparado por `custodia-update.path`, lee la
+solicitud, materializa paquete/firma/allowed_signers y aplica el update. La
+consola nunca reemplaza su propio binario.
+
+**Prueba.** `npm run verify:go:update` instala 0.1.0 firmado en un prefijo
+temporal, crea administrador, una conexión con secreto cifrado y un backup,
+falla una actualización por salud y comprueba el rollback a 0.1.0 con los datos
+intactos, solicita 0.2.0 desde la API, la aplica con el updater y verifica
+versión, login y secreto. `build:core` y los e2e cubren el workspace `Sistema`.
+
+**Límites.** No se ejecutó systemd real ni una release publicada; la descarga
+HTTPS existe pero no se probó contra GitHub; la clave maestra no se rota.
+
+## Build de producción acotado al MVP — 17/11
+
+`PROD-CLEAN-002`: el perfil de producción usa `web/src/sources.core.ts` (PAM,
+Inventario, Conexiones/Actividad, Acceso y Ayuda) y un registro CyberArk con
+runtime PAM. Vite reemplaza los módulos lazy de SIA, Risk, Identity, Personas
+y cobertura por un stub de build; `sources.ts` y `build:demo`/`build:all`
+conservan el árbol completo para la demo y los e2e históricos.
+
+`npm run verify:build:core` construye el perfil y falla si el bundle emite
+chunks de Netskope, SIA, Risk, Personas o DSPM: 67 assets, 2,44 MiB, sin
+coincidencias. `build:demo` y `build:all` compilan y conservan esos módulos.
+README (EN/ES) y sitio se reposicionaron como inventario de herramientas con
+métricas por conector; el sitio compila.
+
+**Límites.** Los módulos heredados siguen en el repositorio para la demo, pero
+no en el bundle de producción. Avisos/licencias de terceros y release pública
+quedan con `PROD-DIST-001`; no se publicó nada.
+
+## Operación desde la consola: versión, salud, backups y diagnóstico — 17/11
+
+`PROD-CONSOLE-001`: la consola suma el workspace `Sistema` con versión actual
+y disponible (manifiesto firmado), salud, solicitud de actualización, backups
+y diagnóstico de conectores. `GET /api/system/version`,
+`POST /api/system/update`, `GET/POST /api/system/backups`,
+`GET /api/system/backups/{name}` y `GET /api/system/diagnostics` son sólo para
+administradores; las mutaciones exigen CSRF y el backup/solicitud se auditan.
+La descarga entrega el archivo SQLite, nunca la clave maestra.
+
+El instalador crea un timer systemd diario a las 03:00 para backups; la consola
+muestra la agenda y advierte que la clave maestra se conserva aparte. El alta
+del primer administrador y el reseteo de contraseña siguen en el host.
+
+**Prueba.** `verify:go:update` crea y descarga un backup real por HTTP antes de
+actualizar, y conserva la conexión con secreto tras el upgrade. El e2e de
+`Sistema` cubre versión, salud, solicitud de actualización, backups y
+diagnósticos con API simulada.
+
+**Límites.** La agenda de backups se configura en systemd, no desde la consola;
+no hay restauración desde la consola; falta aceptación desplegada.
+
+## Instalador, TLS directo y releases firmadas — 17/11
+
+`PROD-INSTALL-001`: contrato en [INSTALL.md](INSTALL.md). `serve` acepta
+`--tls-cert/--tls-key`; sólo con TLS admite una IP no loopback, y el listener
+sin TLS sigue en loopback. `GET /api/health` es público y devuelve
+`{status,version,mode}`; `custodia version` sale con la versión embebida por
+`-ldflags`.
+
+`scripts/install.sh` verifica la firma del manifiesto con OpenSSH Ed25519 y el
+SHA-256 antes de escribir; crea usuario y directorios, instala binario/web,
+genera o copia TLS, ejecuta `init`, crea el administrador con `--must-change`,
+imprime la contraseña temporal una sola vez, escribe la unidad systemd y
+comprueba salud. Es idempotente y `--uninstall [--purge]` conserva datos por
+defecto. `package-go.mjs` embebe versión y firma el manifiesto; el gate construye
+un release local.
+
+**Prueba.** `npm run verify:go:install` instala el paquete firmado en un prefijo
+temporal sin systemd, comprueba versión, `state.db`, `master.key`, TLS y
+`/api/health`, inicia sesión con la contraseña temporal y verifica el cambio
+obligatorio, rechaza una firma ausente y desinstala conservando datos. El
+recorrido systemd real, un certificado provisto en un host descartable y la
+publicación de una release no se ejecutaron; requieren autorización.
+
+**Límites.** No hay ACME en el MVP; el certificado es provisto o autofirmado.
+La firma usa OpenSSH porque está disponible en Linux; una release pública debe
+fijar la clave en el instalador y en el binario. El `curl | sh` publicado queda
+pendiente.
+
+## Wazuh: agentes, grupos y métricas declaradas — 16/11
+
+`PROD-WAZUH-001`: contrato verificado contra la documentación y el OpenAPI de
+Wazuh 4.x. El adaptador `server/internal/adapters/wazuh` lee sólo `GET /agents`
+y `GET /groups`, con paginación de hasta 500, totales del proveedor y una
+allowlist que excluye configuración, claves y payloads. `GET /manager/info`
+sólo participa del probe. Las alertas quedan fuera: viven en el indexer.
+
+La autenticación es `basic-exchange`: usuario API no secreto más contraseña
+cifrada (`vault:`), `POST /security/user/authenticate` y JWT de 900 s en
+memoria. El probe exige `agent:read`, `group:read` y `manager:read`; la
+aceptación usó una política propia de sólo lectura y comprobó `403` en
+`POST /agents`.
+
+Ocho métricas declaradas: agentes totales, activos, pendientes,
+desconectados, nunca conectados, sin contacto hace más de 7 días (`age_over`
+sobre `last_keep_alive`), grupos totales y grupos sin agentes. Un agente sin
+keepalive no cuenta como antiguo.
+
+**Aceptación real.** Manager `wazuh/wazuh-manager:4.14.10` y agente
+`wazuh/wazuh-agent:4.14.10` en Docker, con certificado propio para
+`127.0.0.1` y CA entregada a Custodia. Dataset: 4 agentes (1 activo, 1
+desconectado, 2 nunca conectados), 3 grupos (2 vacíos). Probe con 0 endpoints
+fallidos; publicaciones completas de 4 y 3 registros; métricas 4/1/0/1/2/0/3/2.
+El alta se repitió desde la consola con el secreto cifrado, CA, probe, agenda
+de 15 minutos e inventario con las tarjetas de Wazuh.
+
+**Prueba hermética.** `npm run verify:go:wazuh` ejecuta adapter, probe y lab en
+Go con `-race`, y la conexión de Wazuh desde la consola en Chromium con API
+simulada.
+
+**Límites.** Un solo manager; sin alertas/indexer, cluster, escrituras ni
+acciones sobre agentes; el JWT se renueva por corrida. Una versión mayor del
+manager requiere revisar el contrato. El compose de aceptación es local y no
+se publica.
+
+## Secretos de conexión cifrados y gestión de conexiones — 16/11
+
+`PROD-SECRET-001`: migración aditiva 11 con `lab_connection_secrets`,
+`lab_connection_probes` y `retired_at`. La clave maestra de 32 bytes se genera
+en `init` como `master.key` (0600); `serve` la carga desde `--master-key` o
+`<dir>/master.key`. Los secretos se cifran con XChaCha20-Poly1305 y un AAD que
+liga versión, `group_id` y campo; mover el ciphertext a otra conexión no
+descifra.
+
+La consola permite cargar el secreto una vez (write-only), probar, editar URL
+y agenda, rotar, pausar, reanudar y retirar. La API de listado devuelve sólo
+`secret_configured`, versión y estado del probe; la auditoría registra
+booleanos y versión, nunca el valor ni la referencia interna
+`vault:<group>:auth`. El probe y el worker resuelven el secreto en memoria con
+`probe.PrepareWithResolver`; la agenda sólo se activa después de un probe
+correcto y cualquier cambio de URL, auth, CA o secreto la apaga. Retirar
+conserva historial y auditoría, apaga la agenda y oculta la conexión del
+listado y de `/api/connections`.
+
+Pruebas: crypto (roundtrip, AAD distinto, tamper, clave distinta, permisos),
+store/API (ciphertext en SQLite, sin fuga en GET ni auditoría, rotación,
+pausa/reanudación/retiro y agenda sin probe), UI con alta, prueba, edición,
+rotación, pausa y retiro, y `npm run verify:go:secrets` (Go race + Chromium).
+El backup SQLite no incluye la clave: restaurar en otro host exige conservarla
+por separado; sin clave las conexiones cifradas fallan cerradas.
+
+Límites: no hay rotación de la clave maestra ni secretos cifrados para OAuth
+(mTLS y OAuth conservan referencias); la reubicación a
+`/etc/custodia/master.key` corresponde al instalador. No se ejecutó aceptación
+desplegada.
+
+## Estabilización e2e y reconciliación de residuales — 16/11
+
+`PROD-STAB-001`: la línea base de `verify:web` era 578/589 con 11 fallas.
+Se reprodujeron todas antes de tocar código y se separaron por origen.
+
+**Regresión de `ea80716` (OIDC), 2 fallas.** El modo mínimo de acceso se
+aplicaba a cualquier `authMode` local/OIDC sin `access:manage`; un editor
+delegado con `access:roles_manage` perdía la pestaña de roles. El modo mínimo
+ahora exige la capacidad específica (`access:local_users_manage` para local,
+`access:oidc_manage` para OIDC), así que los roles legacy conservan su
+workspace completo.
+
+**Residuales reconciliados, sin debilitar assertions (9 fallas).**
+- 6 de `auth.spec.ts` (3 modos × 2 temas) esperaban 2 pestañas: la base
+  `d3f10ee` ya renderiza 3 (Usuarios, Revisión de accesos, Roles). La prueba
+  exige 3 y mantiene que no exista «Diagnóstico OIDC».
+- `CompactSelect` medía la geometría durante la animación de entrada de
+  140 ms (3,56 px frente a tolerancia de 2). La prueba espera
+  `getAnimations().finished` y mide la posición final.
+- Actividad: `24b34e1` agregó «Conexiones»; son 6 pestañas, no 5.
+- `NSK-EXP-OFFICE-002` esperaba octubre con el reloj real en noviembre; se
+  fija el reloj a 2026-10-19, el mes del fixture.
+
+**Prueba.** `npm run verify:web` termina 589/589, 0 fallas, 9,8 min. Incluye
+typecheck, lint, estilos, unitarias, `build:demo` y los dos proyectos e2e.
+No hay cambios de producto fuera del fix de roles delegados: el resto son
+reconciliaciones de pruebas con la UI o el fixture vigente.
+
+**Despliegue.** No aplica: es una corrección de pruebas y de una regresión de
+navegación; no toca instalación ni servicios.
+
 ## Acceso OIDC configurable desde la consola — 16/11
 
 `PROD-OIDC-001`: `serve --auth-mode oidc` es un modo independiente, sin

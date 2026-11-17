@@ -26,7 +26,7 @@ function assertion(subject){
 async function listen(server){await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve)); return server.address().port;}
 async function stop(){if(backend?.exitCode===null && backend.signalCode===null){const done=new Promise(resolve=>backend.once('exit',resolve));backend.kill('SIGTERM');await done;}}
 try{
- execFileSync('npm',['--prefix','web','run','build','--','--outDir',web],{cwd:root,env:{...process.env,VITE_DEMO:'0'},stdio:'inherit'});
+ execFileSync('npm',['--prefix','web','run','build','--','--outDir',web],{cwd:root,env:{...process.env,VITE_FULL:'1'},stdio:'inherit'});
  execFileSync('go',['build','-o',binary,'./cmd/custodia'],{cwd:join(root,'server'),env:{...process.env,CGO_ENABLED:'0'},stdio:'inherit'});
  const empty=join(temp,'empty');
  execFileSync(binary,['init','--dir',empty],{stdio:'pipe'});

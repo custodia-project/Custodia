@@ -10,7 +10,9 @@ import (
 	"custodia/server/internal/lab"
 	"custodia/server/internal/localauth"
 	"custodia/server/internal/probe"
+	"custodia/server/internal/secrets"
 	"custodia/server/internal/sqlitebackup"
+	"custodia/server/internal/updater"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -119,9 +121,16 @@ func main() {
 		os.Exit(exitCode(err))
 	}
 }
+
+var version = "dev"
+
+// releasePublicKey is embedded by the release pipeline and used by privileged
+// update helpers to pin the signing key. It is public material only.
+var releasePublicKey = ""
+
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: custodia init|migrate|bootstrap-admin|create-admin|reset-password|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
+		return fmt.Errorf("usage: custodia version|init|migrate|bootstrap-admin|create-admin|reset-password|serve|backup|restore|init-lab|migrate-lab|issue-lab|revoke-lab|add-http-lab|grant-sync-lab|serve-lab|probe-pam --dir PATH")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	dir := f.String("dir", "", "private Custodia data directory")
@@ -129,9 +138,25 @@ func run() error {
 	gatewayConfig := f.String("gateway-config", "", "Ozal assertion configuration (public key references only)")
 	authMode := f.String("auth-mode", "", "serve authentication mode: local, oidc or ozal (required, no default)")
 	publicOrigin := f.String("public-origin", "", "local/oidc public origin (HTTPS, or numeric HTTP loopback for tests)")
+	masterKey := f.String("master-key", "", "master key file; default <dir>/master.key")
+	tlsCert := f.String("tls-cert", "", "TLS certificate path for direct HTTPS")
+	tlsKey := f.String("tls-key", "", "TLS private key path for direct HTTPS")
+	updatePackage := f.String("package", "", "signed release archive to apply")
+	updateSHA := f.String("sha256", "", "release archive SHA-256")
+	updateSignature := f.String("signature", "", "signed manifest file")
+	updateSigners := f.String("allowed-signers", "", "OpenSSH allowed_signers file for the release key")
+	updateBinary := f.String("binary", "", "installed binary path to replace")
+	updateVersion := f.String("update-version", "", "version expected in the release manifest")
+	updateService := f.String("service", "custodia.service", "systemd service to restart")
+	updateHealth := f.String("health-url", "", "health URL checked after the update")
+	updateHealthCA := f.String("health-ca", "", "CA for the health URL")
+	updateNoSystemd := f.Bool("no-systemd", false, "test mode: do not call systemctl")
+	updateManifest := f.String("update-manifest", "", "release manifest path or HTTPS URL shown in the console")
+	updateRequest := f.String("request", "", "console update request to apply")
 	username := f.String("username", "", "local account username")
 	displayName := f.String("display-name", "", "local account display name")
 	passwordFile := f.String("password-file", "", "private file whose first line is the password (default: standard input)")
+	mustChange := f.Bool("must-change", false, "force a password change at the first sign-in")
 	subject := f.String("subject", "", "opaque subject (synthetic only for laboratory commands)")
 	connections := f.String("connections", "", "comma-separated allowed connection IDs")
 	output := f.String("out", "", "new private credential file or backup destination")
@@ -150,7 +175,8 @@ func run() error {
 	grants := f.String("grant", "", "comma-separated laboratory subjects with read/run access")
 	canRun := f.Bool("can-run", true, "grant the explicit sync run capability")
 	probeAuthorized := f.Bool("authorized", false, "explicit owner authorization for this exact probe tenant")
-	probeAuth := f.String("auth", "bearer", "probe auth mode: bearer, oauth-client-credentials or mtls")
+	probeAuth := f.String("auth", "bearer", "probe auth mode: bearer, basic-exchange, oauth-client-credentials or mtls")
+	probeAuthUser := f.String("auth-user", "", "basic-exchange API user (read-only)")
 	credentialRef := f.String("credential-ref", "", "bearer credential reference: env:NAME, file:ABSOLUTE_PATH or secret:NAME")
 	probeTokenURL := f.String("token-url", "", "OAuth token endpoint URL")
 	probeClientIDRef := f.String("client-id-ref", "", "OAuth client ID reference")
@@ -166,7 +192,7 @@ func run() error {
 	if err := f.Parse(os.Args[2:]); err != nil {
 		return err
 	}
-	if *dir == "" && os.Args[1] != "probe-pam" {
+	if *dir == "" && os.Args[1] != "probe-pam" && os.Args[1] != "version" {
 		return fmt.Errorf("--dir is required")
 	}
 	if strings.HasSuffix(os.Args[1], "-lab") && (*gatewayConfig != "" || *authMode != "" || *publicOrigin != "") {
@@ -175,7 +201,7 @@ func run() error {
 	switch os.Args[1] {
 	case "probe-pam":
 		plan, err := probe.NewPlan(probe.Config{
-			BaseURL: *baseURL, AuthMode: *probeAuth, CredentialRef: *credentialRef,
+			BaseURL: *baseURL, AuthMode: *probeAuth, AuthUser: *probeAuthUser, CredentialRef: *credentialRef,
 			TokenURL: *probeTokenURL, ClientIDRef: *probeClientIDRef, ClientSecretRef: *probeClientSecretRef,
 			Scopes: []string(probeScopes), ClientCertFile: *probeClientCert, ClientKeyFile: *probeClientKey,
 			CAFile: *caFile, Endpoints: []string(probeEndpoints), Authorized: *probeAuthorized, Timeout: *probeTimeout,
@@ -262,6 +288,9 @@ func run() error {
 		defer s.DB.Close()
 		if err = s.Migrate(context.Background()); err != nil {
 			return err
+		}
+		if _, err = secrets.Generate(secrets.PathFor(*dir)); err != nil {
+			return fmt.Errorf("master key: %w", err)
 		}
 		if os.Args[1] == "init" {
 			fmt.Println("Initialized empty Custodia database. Bootstrap a verified administrator explicitly before serving.")
@@ -447,7 +476,7 @@ func run() error {
 		if *connections != "" {
 			scope = strings.Split(*connections, ",")
 		}
-		if err = s.CreateLocalAdministrator(context.Background(), normalized, *displayName, hash, scope, time.Now()); err != nil {
+		if err = s.CreateLocalAdministrator(context.Background(), normalized, *displayName, hash, scope, *mustChange, time.Now()); err != nil {
 			if errors.Is(err, lab.ErrLocalBootstrap) {
 				return err
 			}
@@ -477,14 +506,44 @@ func run() error {
 			scope = strings.Split(*connections, ",")
 		}
 		return s.BootstrapAdministrator(context.Background(), config.Issuer, *subject, scope)
+	case "update":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if *updateRequest != "" {
+			if err := updater.ApplyRequest(ctx, *updateRequest, updater.Options{
+				DataDir: *dir, Binary: *updateBinary, WebDir: *webDir, HealthURL: *updateHealth,
+				HealthCA: *updateHealthCA, Service: *updateService, NoSystemd: *updateNoSystemd,
+				AllowedSigners: *updateSigners, CurrentVersion: version,
+			}); err != nil {
+				return err
+			}
+			fmt.Println("Console update applied")
+			return nil
+		}
+		if err := updater.Apply(ctx, updater.Options{
+			DataDir: *dir, Binary: *updateBinary, WebDir: *webDir, Package: *updatePackage,
+			SHA256: *updateSHA, Signature: *updateSignature, AllowedSigners: *updateSigners,
+			Version: *updateVersion, CurrentVersion: version, HealthURL: *updateHealth, HealthCA: *updateHealthCA,
+			Service: *updateService, NoSystemd: *updateNoSystemd,
+		}); err != nil {
+			return err
+		}
+		fmt.Println("Updated to", *updateVersion)
+		return nil
+	case "version":
+		fmt.Println(version)
+		return nil
 	case "serve", "serve-lab":
 		host, _, err := net.SplitHostPort(*addr)
 		if err != nil {
 			return err
 		}
 		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return fmt.Errorf("Custodia backend requires a numeric loopback address")
+		if (*tlsCert == "") != (*tlsKey == "") {
+			return fmt.Errorf("--tls-cert and --tls-key must be provided together")
+		}
+		if ip == nil || (!ip.IsLoopback() && *tlsCert == "") {
+			return fmt.Errorf("Custodia backend requires a numeric loopback address unless direct TLS is configured")
 		}
 		path := filepath.Join(*dir, "state.db")
 		if _, err = os.Stat(path); err != nil {
@@ -497,6 +556,17 @@ func run() error {
 		defer s.DB.Close()
 		if err = s.CheckSchema(context.Background()); err != nil {
 			return err
+		}
+		keyPath := *masterKey
+		if keyPath == "" {
+			keyPath = secrets.PathFor(*dir)
+		}
+		if key, keyErr := secrets.Load(keyPath); keyErr == nil {
+			s.SetMasterKey(key)
+		} else if errors.Is(keyErr, secrets.ErrKeyMissing) {
+			fmt.Println("No master key found: encrypted connection secrets are unavailable. Run init or provide --master-key.")
+		} else {
+			return fmt.Errorf("master key: %w", keyErr)
 		}
 		var handler http.Handler
 		if os.Args[1] == "serve-lab" {
@@ -532,6 +602,7 @@ func run() error {
 				if err != nil {
 					return err
 				}
+				config.Version = version
 				handler, err = gateway.NewHandler(s, config, time.Now, files)
 				if err != nil {
 					return err
@@ -540,7 +611,7 @@ func run() error {
 				if *gatewayConfig != "" {
 					return fmt.Errorf("local mode does not accept --gateway-config")
 				}
-				handler, err = localauth.NewHandler(s, localauth.Config{PublicOrigin: *publicOrigin}, time.Now, files)
+				handler, err = localauth.NewHandler(s, localauth.Config{PublicOrigin: *publicOrigin, Version: version, DataDir: *dir, UpdateManifest: *updateManifest}, time.Now, files)
 				if err != nil {
 					return err
 				}
@@ -551,7 +622,7 @@ func run() error {
 				if *gatewayConfig != "" {
 					return fmt.Errorf("oidc mode does not accept --gateway-config")
 				}
-				handler, err = localauth.NewOIDCHandler(s, localauth.Config{PublicOrigin: *publicOrigin, Mode: "oidc"}, time.Now, files)
+				handler, err = localauth.NewOIDCHandler(s, localauth.Config{PublicOrigin: *publicOrigin, Mode: "oidc", Version: version, DataDir: *dir, UpdateManifest: *updateManifest}, time.Now, files)
 				if err != nil {
 					return err
 				}
@@ -589,7 +660,11 @@ func run() error {
 			return err
 		}
 		fmt.Println("Custodia "+os.Args[1]+" listening on", listener.Addr())
-		err = srv.Serve(listener)
+		if *tlsCert != "" {
+			err = srv.ServeTLS(listener, *tlsCert, *tlsKey)
+		} else {
+			err = srv.Serve(listener)
+		}
 		if err == http.ErrServerClosed {
 			return nil
 		}

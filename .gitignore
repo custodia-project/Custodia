@@ -4,6 +4,7 @@
 !.env.example
 *.key
 *.pem
+master.key
 .secrets/
 presentation/
 # Local build and development output
@@ -22,3 +23,4 @@ artifacts/
 # Copia local del DSHub original (datos del empleador): nunca subir
 DSHub-feat-netskope-dev/
 *.zip
+server.pid

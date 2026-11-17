@@ -5,8 +5,8 @@
 <h1 align="center">Custodia</h1>
 
 <p align="center">
-  <strong>Lo que tus herramientas de seguridad saben, juntas.</strong><br>
-  Custodia une con reglas explícitas los registros de las herramientas de seguridad que ya usás y muestra lo que ninguna ve sola. Cada conclusión lleva su regla, su fuente y su captura.
+  <strong>El inventario de tus herramientas de seguridad, con sus métricas.</strong><br>
+  Custodia conecta las herramientas que ya usás, recolecta su inventario con procedencia y muestra métricas declaradas por cada conector. Cada valor indica su fuente, su fecha y si la corrida fue completa o parcial.
 </p>
 
 <p align="center">
@@ -28,35 +28,35 @@
 
 ## El problema
 
-Cada consola responde su propia pregunta. El PAM sabe quién tiene cuentas
-privilegiadas. El proxy SSE sabe qué equipos reportan. El proveedor de
-identidad sabe quién existe. Nadie es dueño de la respuesta *entre* ellas, así
-que vive en planillas que quedan viejas el mismo día y se cruzan por nombre,
-sin que nadie pueda auditarlo.
+Cada herramienta de seguridad tiene su consola y su forma de contar. El PAM
+sabe cuántos Safes y cuentas administra; el SIEM sabe cuántos agentes reportan;
+el resto queda en planillas que envejecen el mismo día. Comparar herramientas
+exige abrir una por una y confiar en números sin fecha ni procedencia.
 
-Custodia reemplaza esa planilla por un inventario que recuerda de dónde salió
-cada dato y se niega a adivinar.
+Custodia conecta esas herramientas, conserva el inventario con su origen y
+publica métricas declaradas por cada conector. Un valor sin datos es «no
+disponible», nunca cero; una corrida parcial se marca y no se usa para
+conclusiones que necesitan el total.
 
-## Preguntas que responde
+## Qué responde
 
-| Pregunta | Qué dice Custodia | Veredicto |
-|---|---|---|
-| ¿Quién tiene acceso privilegiado sin un equipo visible? | Alice está en un Safe de CyberArk con una cuenta de servicio; Netskope ve su usuario, pero ningún equipo en una captura completa. | **Brecha** |
-| ¿De quién dejaron de reportar los equipos? | Uno de los dos equipos de Bob lleva 12 días en silencio. No prueba que se haya dado de baja, así que la cobertura queda parcial. | **Parcial** |
-| ¿Qué identidad es esta persona? | Dos registros activos de identidad comparten el correo de Eve. Custodia no une ninguno y espera que una persona elija. | **Desconocido** |
-| ¿Qué dice realmente cada herramienta? | Cada registro tal como lo entregó la herramienta, con su ID de origen y su corrida, y el vínculo propuesto aparte. | Registros crudos |
-
-Las cuatro están en la demo, con una empresa ficticia (Acme Corp).
+| Pregunta | Qué muestra Custodia |
+|---|---|
+| ¿Qué herramientas están conectadas y cuándo corrieron? | Inventario por conexión, colecciones, última publicación y completitud. |
+| ¿Cuántos agentes, Safes o cuentas hay? | Totales y cortes por estado, con la fecha de los datos. |
+| ¿Qué cambió o dejó de reportar? | Antigüedad, parcialidad y valores no disponibles, nunca un cero inventado. |
+| ¿De dónde sale cada número? | Drill-down a los registros exactos que componen la métrica y su corrida. |
 
 ## Cómo funciona
 
-1. **Recolectar.** Adaptadores de sólo lectura por herramienta. Cada registro
-   conserva su ID de origen, la corrida que lo trajo y su antigüedad.
-2. **Unir.** Un vínculo necesita una coincidencia exacta y única. Dos
-   candidatos significan ningún vínculo y una decisión humana, nunca una
-   moneda al aire.
-3. **Concluir.** Reglas versionadas convierten los registros unidos en
-   veredictos con su evidencia: cubierto, parcial, brecha o desconocido.
+1. **Conectar.** El administrador carga la herramienta desde la consola con
+   URL, credenciales cifradas o una referencia, CA y colecciones. Un probe
+   valida el acceso antes de agendar.
+2. **Recolectar.** Un worker lee sólo las colecciones declaradas, conserva el
+   ID externo, la corrida y la antigüedad, y publica de forma transaccional.
+3. **Medir.** Cada conector declara sus métricas en el binario; se calculan al
+   leer sobre la última publicación. Sin datos no hay cero: hay «no
+   disponible».
 
 ## Principios de diseño
 
@@ -79,27 +79,31 @@ chequeos de cobertura, bajas y auditorías.
 
 ## Fuentes
 
-| Hoy, en la demo | Después |
+| Implementadas | Catálogo abierto pendiente |
 |---|---|
-| CyberArk PAM (Safes, cuentas, miembros) · Netskope SSE (usuarios, equipos, postura) | BigID, CrowdStrike, Cortex XDR, Tenable, firewalls |
+| CyberArk PAM (Safes, miembros, cuentas, plataformas, PSM) · Wazuh (agentes, grupos) | Fleet, DefectDojo, CrowdSec, OPNsense, Keycloak, MISP, OpenBao; comerciales con tenant de cliente |
 
-Cada fuente nueva llega con su contrato y sus reglas; el núcleo no está atado a
-estos dos fabricantes.
+Cada fuente nueva llega con su contrato, su allowlist y sus métricas. No hay
+una población «Identity» en el MVP: el foco es el inventario y las métricas de
+cada herramienta.
 
 ## Estado y hoja de ruta
 
-Custodia es un prototipo honesto. La interfaz corre contra datos sintéticos; el laboratorio Go/SQLite inicia
-la migración del backend. Las integraciones reales siguen pendientes.
+Custodia es un MVP autohospedado en construcción. El login local, OIDC,
+inventario con métricas, Wazuh aceptado contra 4.14.10, secretos cifrados e
+instalador con TLS ya están implementados y probados en laboratorio. La
+actualización desde la consola y el recorte del build de producción cierran la
+tanda; la aceptación en un host real sigue pendiente.
 
 | Etapa | Qué | Estado |
 |---|---|---|
-| Demo | Personas cruzadas entre CyberArk y Netskope, veredictos con evidencia e inventario de cada herramienta, en español e inglés. Corre entera en el navegador. | Hecho |
-| Backend | Go y SQLite; las reglas existentes pasan con sus pruebas de regresión. | En curso |
-| Autohospedado | Adaptadores reales de CyberArk y Netskope, ingreso por OIDC e instalación reproducible. | Siguiente |
-| Más fuentes | Herramientas de datos, endpoint, vulnerabilidades y firewalls. | Después |
+| Acceso | Login local, sesiones, CSRF, administración y OIDC configurable. | Hecho en laboratorio |
+| Inventario | Métricas declaradas, CyberArk PAM y Wazuh con aceptación propia. | Hecho |
+| Operación | Instalador, TLS, backups, actualización firmada y rollback. | Hecho en gate local |
+| Distribución | Release pública, host descartable y avisos de terceros. | Pendiente |
 
-Una versión alojada (SaaS) sólo se evaluará después de un uso real y
-recurrente de la instalación autohospedada.
+La demo conserva los módulos heredados de DS Hub (Personas, Netskope SSE,
+SIA/Risk, DSPM); el build de producción los excluye.
 
 ## Probarlo
 
@@ -186,3 +190,7 @@ El modo `serve` incorpora un receptor de identidad firmada de Ozal y el alta
 explícita del primer administrador. `npm run verify:go:gateway` prueba ingreso,
 permisos y logout con la UI real y un gateway temporal. Falta aceptar la
 integración contra una instancia real de Ozal; ver [acceso](docs/ACCESS.md).
+
+## Instalación
+
+El contrato de instalación, TLS, firma de releases, layout y desinstalación está en [docs/INSTALL.md](docs/INSTALL.md). El instalador de esta entrega prueba artefactos locales firmados; la publicación de releases requiere pedido explícito.

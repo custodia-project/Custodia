@@ -7,6 +7,8 @@ const (
 	UnitSafes     = "safes"
 	UnitAccounts  = "accounts"
 	UnitPlatforms = "platforms"
+	UnitAgents    = "agents"
+	UnitGroups    = "groups"
 	UnitPercent   = "percent"
 )
 
@@ -61,6 +63,60 @@ var declared = []Definition{
 		Description: "Plataformas con active = false. Una plataforma sin ese dato no se cuenta.",
 		Collection:  "platforms", Kind: KindCountWhere, Unit: UnitPlatforms,
 		Where: &Condition{Field: "active", Values: []string{"false"}},
+	},
+	{
+		ID: "wazuh.agents.total.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes totales",
+		Description: "Agentes registrados en el manager en la última publicación de la colección agents.",
+		Collection:  "agents", Kind: KindCount, Unit: UnitAgents,
+	},
+	{
+		ID: "wazuh.agents.active.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes activos",
+		Description: "Agentes con status active. Un agente sin ese dato no se cuenta.",
+		Collection:  "agents", Kind: KindCountWhere, Unit: UnitAgents,
+		Where: &Condition{Field: "status", Values: []string{"active"}},
+	},
+	{
+		ID: "wazuh.agents.pending.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes pendientes",
+		Description: "Agentes con status pending.",
+		Collection:  "agents", Kind: KindCountWhere, Unit: UnitAgents,
+		Where: &Condition{Field: "status", Values: []string{"pending"}},
+	},
+	{
+		ID: "wazuh.agents.disconnected.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes desconectados",
+		Description: "Agentes con status disconnected. No mide la causa ni si el equipo sigue existiendo.",
+		Collection:  "agents", Kind: KindCountWhere, Unit: UnitAgents,
+		Where: &Condition{Field: "status", Values: []string{"disconnected"}},
+	},
+	{
+		ID: "wazuh.agents.never_connected.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes nunca conectados",
+		Description: "Agentes con status never_connected.",
+		Collection:  "agents", Kind: KindCountWhere, Unit: UnitAgents,
+		Where: &Condition{Field: "status", Values: []string{"never_connected"}},
+	},
+	{
+		ID: "wazuh.agents.stale_7d.v1", Connector: connectors.Wazuh,
+		Name:        "Agentes sin contacto hace más de 7 días",
+		Description: "Agentes cuyo last_keep_alive es anterior a 7 días respecto de la publicación. Un agente sin ese dato no se cuenta.",
+		Collection:  "agents", Kind: KindAgeOver, Unit: UnitAgents,
+		AgeField: "last_keep_alive", ThresholdDays: 7,
+	},
+	{
+		ID: "wazuh.groups.total.v1", Connector: connectors.Wazuh,
+		Name:        "Grupos totales",
+		Description: "Grupos declarados en el manager en la última publicación de la colección groups.",
+		Collection:  "groups", Kind: KindCount, Unit: UnitGroups,
+	},
+	{
+		ID: "wazuh.groups.empty.v1", Connector: connectors.Wazuh,
+		Name:        "Grupos sin agentes",
+		Description: "Grupos con agent_count = 0. Un grupo sin ese dato no se cuenta.",
+		Collection:  "groups", Kind: KindCountWhere, Unit: UnitGroups,
+		Where: &Condition{Field: "agent_count", Values: []string{"0"}},
 	},
 	{
 		ID: "cyberark-pam.platforms.psm_unresolved.v1", Connector: connectors.CyberArkPAM,

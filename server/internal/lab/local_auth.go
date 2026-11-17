@@ -97,7 +97,7 @@ func insertLocalAccount(ctx context.Context, tx *sql.Tx, username, display, hash
 
 // CreateLocalAdministrator is the explicit host bootstrap of local mode. It
 // succeeds once; recovery afterwards is ResetLocalPassword.
-func (s *Store) CreateLocalAdministrator(ctx context.Context, username, display, hash string, connections []string, now time.Time) error {
+func (s *Store) CreateLocalAdministrator(ctx context.Context, username, display, hash string, connections []string, mustChange bool, now time.Time) error {
 	username, ok := NormalizeLocalUsername(username)
 	if !ok || !validDisplayName(display) || hash == "" {
 		return ErrDenied
@@ -114,7 +114,7 @@ func (s *Store) CreateLocalAdministrator(ctx context.Context, username, display,
 	if count != 0 {
 		return ErrLocalBootstrap
 	}
-	id, err := insertLocalAccount(ctx, tx, username, display, hash, false, connections, now)
+	id, err := insertLocalAccount(ctx, tx, username, display, hash, mustChange, connections, now)
 	if err != nil {
 		return err
 	}
@@ -582,4 +582,18 @@ func (s *Store) LocalAccountsExist(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("local accounts: %w", err)
 	}
 	return count > 0, nil
+}
+
+// RecordAudit appends an administration event outside a caller-owned
+// transaction. It is used by the authenticated system surface.
+func (s *Store) RecordAudit(ctx context.Context, actor, action string, after map[string]any, now time.Time) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = audit(ctx, tx, actor, action, after, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

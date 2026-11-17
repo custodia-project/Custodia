@@ -12,6 +12,7 @@ const UsersWorkspace = lazy(() => import('../components/users-workspace').then((
 const ActivityWorkspace = lazy(() => import('../components/activity-workspace').then((module) => ({ default: module.ActivityWorkspace })));
 const HelpWorkspace = lazy(() => import('../components/help-workspace').then((module) => ({ default: module.HelpWorkspace })));
 const ToolInventoryWorkspace = lazy(() => import('../components/tool-inventory-workspace').then((module) => ({ default: module.ToolInventoryWorkspace })));
+const SystemWorkspace = lazy(() => import('../components/system-workspace').then((module) => ({ default: module.SystemWorkspace })));
 
 type AdminDomainRouterProps = {
   workspaceView: WorkspaceView;
@@ -43,6 +44,7 @@ export function AdminDomainRouter({
     />}
     {workspaceView === 'activity' && <ActivityWorkspace permissions={permissions} onUnauthorized={onUnauthorized} />}
     {workspaceView === 'inventory' && <ToolInventoryWorkspace onUnauthorized={onUnauthorized} />}
+    {workspaceView === 'system' && <SystemWorkspace onNotice={(message) => { onError(''); onNotice(message); }} onError={(message) => { onNotice(''); onError(message); }} />}
     {workspaceView === 'help' && <HelpWorkspace
       apiDocsEnabled={apiDocsEnabled === true}
       requestedSection={guideSection ?? null}

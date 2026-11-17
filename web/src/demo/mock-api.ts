@@ -60,6 +60,8 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
   const oidcPendingRows = [{ issuer: 'https://idp.acme.example', subject: 'sub-ada', email: 'ada@acme.example', display_name: 'Ada Externa', first_seen: oidcNow, last_seen: oidcNow }];
   const oidcUserRows: MockOIDCUser[] = oidcEnabled ? [{ issuer: 'https://idp.acme.example', subject: 'sub-bruno', display_name: 'Bruno Externo', email: 'bruno@acme.example', enabled: true, last_login_at: oidcNow, active_sessions: 1, connections: ['acme-identity'] }] : [];
   const oidcStatus = () => ({ configured: oidcConfig !== null, enabled: oidcConfig?.enabled === true, login_url: '/api/auth/oidc/start' });
+  const connectionGroups: Array<Record<string, unknown>> = [];
+  const connectionGroup = (id: string) => connectionGroups.find((row) => row.group_id === id);
   const peopleByEmail = new Map<string, { key: string; email: string; display_name: string; identities: Record<string, unknown>[] }>();
   for (const user of userRows) {
     const email = String(user.email || '');
@@ -398,7 +400,12 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
         changed_30d: 1, changed_90d: 1, changed_365d: 0, changed_older: 0, changed_unknown: 1,
       },
       '/api/ingestion/runs': { rows: [] },
+      '/api/ingestion/connectors': { rows: [{ id: 'cyberark-pam-safes-v1', name: 'CyberArk PAM', vendor: 'CyberArk', category: 'PAM', status: 'available', auth_modes: ['bearer', 'oauth-client-credentials', 'mtls'], collections: ['safes', 'safe_members', 'accounts'], probe_endpoints: ['/API/Safes'], notes: 'Read-only PAM.' }, { id: 'wazuh', name: 'Wazuh', vendor: 'Wazuh', category: 'SIEM/XDR', status: 'available', auth_modes: ['basic-exchange'], collections: ['agents', 'groups'], probe_endpoints: ['/agents', '/groups', '/manager/info'], notes: 'Read-only agents and groups.' }] },
       '/api/inventory/tools': inventoryTools,
+      '/api/health': { status: 'ok', version: '0.1.0-demo', mode: authMode },
+      '/api/system/version': { current: '0.1.0-demo', available: '0.2.0-demo', update_available: true, manifest_configured: true, mode: authMode },
+      '/api/system/backups': { rows: [{ name: 'custodia-20261116-030000.db', size: 1048576, created_at: '2026-11-16T03:00:00Z' }] },
+      '/api/system/diagnostics': { rows: [{ group_id: 'acme-pam', connector: 'cyberark-pam-safes-v1', auth_mode: 'bearer', secret_configured: true, interval_minutes: 15, enabled: true, retired_at: '', last_probe: { ok: true, at: '2026-11-16T12:00:00Z' } }] },
       '/api/connections': { rows: [{ id: 'acme-identity', kind: 'identity' }, { id: 'acme-netskope', kind: 'sse' }] },
       '/api/events': { rows: [] },
       '/api/workspaces/preferences': { visible_workspaces: ['safes'], hidden_workspaces: [], recent_workspaces: [], updated_at: null },
@@ -663,6 +670,73 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
     let responseStatus = 200;
     let responseHeaders: Record<string, string> = {};
     const method = route.request().method();
+    if (pathname === '/api/system/update' && method === 'POST') {
+      responseStatus = 202;
+      responseBody = { requested: true, version: '0.2.0-demo' };
+    }
+    if (pathname === '/api/system/backups' && method === 'POST') {
+      responseStatus = 201;
+      responseBody = { name: 'custodia-20261117-120000.db', size: 1048576, created_at: '2026-11-17T12:00:00Z' };
+    }
+    if (pathname === '/api/ingestion/connections' && method === 'GET') {
+      responseBody = { rows: connectionGroups };
+    }
+    if (pathname === '/api/ingestion/connections' && method === 'POST') {
+      const payload = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const groupId = `acme-${String(payload.connector ?? 'tool').replace(/-v1$/, '').replace(/[^a-z0-9-]/g, '').slice(0, 24)}`;
+      const created = {
+        group_id: groupId, connector: payload.connector, base_url: payload.base_url,
+        collections: payload.collections ?? [], auth_mode: payload.auth_mode,
+        enabled: true, retired_at: '', interval_minutes: Number(payload.interval_minutes ?? 0),
+        credential_configured: Boolean(payload.secret || payload.credential_ref), secret_configured: Boolean(payload.secret), secret_version: payload.secret ? 1 : 0,
+        last_probe: null,
+      };
+      connectionGroups.unshift(created);
+      responseStatus = 201;
+      responseBody = { ...created, collection: (payload.collections as string[] | undefined)?.[0] ?? '', scope: payload.scope, connections: [], secret_configured: Boolean(payload.secret) };
+    }
+    const connectionMatch = pathname.match(/^\/api\/ingestion\/connections\/([^/]+)(?:\/(probe|secret|pause|resume|retire))?$/);
+    if (connectionMatch && method !== 'GET') {
+      const group = connectionGroup(decodeURIComponent(connectionMatch[1]));
+      if (!group) {
+        responseStatus = 404;
+        responseBody = { detail: 'Conexión no encontrada.' };
+      } else if (connectionMatch[2] === 'probe') {
+        group.last_probe = { at: '2026-11-16T12:00:00Z', ok: true, detail: '1 endpoints, 0 with errors' };
+        responseBody = { failed_endpoints: 0, report: { endpoints: [{ endpoint: '/API/Safes', status: '200', objects: 2, duration_ms: 12 }] } };
+      } else if (connectionMatch[2] === 'secret') {
+        const payload = (route.request().postDataJSON() ?? {}) as { secret?: string };
+        if (!payload.secret) {
+          responseStatus = 400;
+          responseBody = { detail: 'Secreto inválido.' };
+        } else {
+          group.secret_configured = true;
+          group.credential_configured = true;
+          group.secret_version = Number(group.secret_version) + 1;
+          group.last_probe = null;
+          group.interval_minutes = 0;
+          responseBody = { version: group.secret_version, secret_configured: true };
+        }
+      } else if (connectionMatch[2] === 'pause') {
+        group.enabled = false; group.interval_minutes = 0; responseBody = { action: 'pause' };
+      } else if (connectionMatch[2] === 'resume') {
+        group.enabled = true; responseBody = { action: 'resume' };
+      } else if (connectionMatch[2] === 'retire') {
+        group.enabled = false; group.retired_at = '2026-11-16T12:00:00Z'; group.interval_minutes = 0; responseBody = { action: 'retire' };
+      } else if (method === 'PUT') {
+        const payload = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+        const nextInterval = Number(payload.interval_minutes ?? group.interval_minutes);
+        const lastProbe = group.last_probe as { ok?: boolean } | null;
+        if (nextInterval > 0 && (!lastProbe || lastProbe.ok !== true)) {
+          responseStatus = 409;
+          responseBody = { detail: 'Probá la conexión correctamente antes de activar la agenda.' };
+        } else {
+          if (typeof payload.base_url === 'string') group.base_url = payload.base_url;
+          group.interval_minutes = nextInterval;
+          responseBody = { updated: true, group_id: group.group_id };
+        }
+      }
+    }
     if (pathname.startsWith('/api/inventory/metrics/') && pathname.endsWith('/records')) {
       const metricId = decodeURIComponent(pathname.slice('/api/inventory/metrics/'.length, -'/records'.length));
       const connectionId = requestUrl.searchParams.get('connection') ?? '';
@@ -1067,7 +1141,7 @@ export function createMockApi(options: MockOptions = {}): (request: MockRequest)
 const WORKSPACE_PREFERENCE_ALLOWLIST = new Set([
   'general', 'posture', 'graph', 'person', 'safes', 'roles', 'platforms', 'connectors', 'pamCleanup',
   'identityUsers', 'identityGroups', 'identityRoles', 'sia', 'identity', 'assets',
-  'users', 'activity', 'help', 'pamHealth', 'siaConnectors', 'inventory',
+  'users', 'activity', 'help', 'pamHealth', 'siaConnectors', 'inventory', 'system',
    'siaResources', 'siaDatabaseAccounts', 'identityFederations', 'ipInventory',
   'netskope', 'netskopeOperations', 'netskopeChains', 'netskopeInventory', 'netskopeUsers', 'netskopeDevices',
   'netskopeDlp', 'netskopeDemSites', 'netskopeUci', 'netskopePosture', 'netskopeAdmins', 'netskopeOfficeExperience',

@@ -39,12 +39,12 @@ export function domainWorkspaces(id: Domain): WorkspaceView[] {
    neutral Conexiones area (`cross`), not CyberArk, and the administration
    views under their own `admin` area. */
 export function areaOf(view: WorkspaceView): Domain {
-  return CATALOG_BY_ID[view].domain;
+  return CATALOG_BY_ID[view]?.domain ?? 'cross';
 }
 
 /** Navigation area and runtime host remain distinct for sanctioned compositions. */
 export function domainOf(view: WorkspaceView): Domain {
-  return CATALOG_BY_ID[view].routingDomain ?? areaOf(view);
+  return CATALOG_BY_ID[view]?.routingDomain ?? areaOf(view);
 }
 
 /* Quick access grows with the platforms Custodia integrates: three slots per

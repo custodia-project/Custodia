@@ -36,8 +36,11 @@ var (
 // Config is the explicit authentication-mode configuration. Mode is "local"
 // or "oidc"; an empty value means local for existing callers.
 type Config struct {
-	PublicOrigin string
-	Mode         string
+	PublicOrigin   string
+	Mode           string
+	Version        string
+	DataDir        string
+	UpdateManifest string
 }
 
 func (c Config) mode() string {
@@ -187,6 +190,14 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := h.now()
+	if r.URL.Path == "/api/health" && r.Method == "GET" {
+		version := h.config.Version
+		if version == "" {
+			version = "dev"
+		}
+		send(w, 200, map[string]any{"status": "ok", "version": version, "mode": h.config.mode()})
+		return
+	}
 	if h.oidcMode() {
 		switch r.URL.Path {
 		case "/api/auth/oidc/start":
@@ -273,6 +284,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.oidcMode() && (r.URL.Path == "/api/access/oidc" || strings.HasPrefix(r.URL.Path, "/api/access/oidc/")) {
 		h.oidcAdmin(w, r, session, current)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/system/") {
+		h.system(w, r, session, current)
 		return
 	}
 	if r.URL.Path == "/api/access/users" || strings.HasPrefix(r.URL.Path, "/api/access/users/") {

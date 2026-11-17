@@ -116,6 +116,23 @@ var collections = map[string]Collection{
 			"secret_modified_at": true,
 		},
 	},
+	// agents is the Wazuh agent inventory. Only status/OS metadata and
+	// last-keepalive timestamps are normalized; group is a comma-joined list.
+	"agents": {
+		Name:     "agents",
+		Required: []string{"name", "status"},
+		Allowed: map[string]bool{
+			"name": true, "status": true, "ip": true, "register_ip": true,
+			"os_name": true, "os_platform": true, "os_version": true, "os_arch": true,
+			"agent_version": true, "groups": true, "group_count": true,
+			"last_keep_alive": true, "date_add": true, "manager": true, "node_name": true,
+		},
+	},
+	"groups": {
+		Name:     "groups",
+		Required: []string{"name"},
+		Allowed:  map[string]bool{"name": true, "agent_count": true},
+	},
 	// platforms is the non-secret PAM platform catalog. AllowedSafes and
 	// platform properties from the detail endpoint are not part of this slice.
 	"platforms": {

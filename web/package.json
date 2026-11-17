@@ -44,6 +44,7 @@
     "test:e2e:netskope": "node scripts/e2e-groups.mjs netskope",
     "test:e2e:cross": "node scripts/e2e-groups.mjs cross",
     "build:demo": "VITE_DEMO=1 npm run build",
+    "build:all": "VITE_FULL=1 npm run build",
     "preview:demo": "npm run build:demo && vite preview"
   },
   "overrides": {

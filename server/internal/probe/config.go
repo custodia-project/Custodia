@@ -25,6 +25,7 @@ type AuthMode string
 
 const (
 	AuthBearer           AuthMode = "bearer"
+	AuthBasicExchange    AuthMode = "basic-exchange"
 	AuthOAuthClientCreds AuthMode = "oauth-client-credentials"
 	AuthMTLS             AuthMode = "mtls"
 )
@@ -32,6 +33,7 @@ const (
 // Endpoints are the only read-only PAM endpoints this probe may plan. Mutating
 // endpoints, account secret material and session recordings are excluded.
 var Endpoints = map[string]bool{
+	"/agents": true, "/groups": true, "/manager/info": true,
 	"/API/Accounts":       true,
 	"/API/Platforms":      true,
 	"/API/PSM/Connectors": true,
@@ -45,6 +47,7 @@ var Endpoints = map[string]bool{
 type Config struct {
 	BaseURL       string
 	AuthMode      string
+	AuthUser      string
 	CredentialRef string
 
 	// OAuth client credentials.
@@ -69,6 +72,7 @@ type Config struct {
 type Plan struct {
 	BaseURL         string
 	AuthMode        AuthMode
+	AuthUser        string
 	CredentialRef   string
 	TokenURL        string
 	ClientIDRef     string
@@ -115,6 +119,15 @@ func NewPlan(config Config) (Plan, error) {
 		if err = validReference(config.CredentialRef, "probe requires a bounded credential reference"); err != nil {
 			return Plan{}, err
 		}
+		plan.CredentialRef = strings.TrimSpace(config.CredentialRef)
+	case AuthBasicExchange:
+		if err = validAuthUser(config.AuthUser); err != nil {
+			return Plan{}, err
+		}
+		if err = validReference(config.CredentialRef, "basic exchange requires a bounded password reference"); err != nil {
+			return Plan{}, err
+		}
+		plan.AuthUser = strings.TrimSpace(config.AuthUser)
 		plan.CredentialRef = strings.TrimSpace(config.CredentialRef)
 	case AuthOAuthClientCreds:
 		tokenURL, err := parseHTTPSOrigin(config.TokenURL, true)
@@ -171,8 +184,10 @@ func parseAuthMode(raw string) (AuthMode, error) {
 		return AuthOAuthClientCreds, nil
 	case "mtls", "m-tls", "mutual-tls":
 		return AuthMTLS, nil
+	case "basic-exchange", "basic_exchange":
+		return AuthBasicExchange, nil
 	default:
-		return "", errors.New("probe auth mode must be bearer, oauth-client-credentials or mtls")
+		return "", errors.New("probe auth mode must be bearer, basic-exchange, oauth-client-credentials or mtls")
 	}
 }
 
@@ -211,13 +226,28 @@ func validLocalPath(path string) bool {
 	return path != "" && filepath.IsAbs(path) && strings.IndexFunc(path, unicode.IsControl) < 0
 }
 
+func validAuthUser(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 256 || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return errors.New("basic exchange requires a bounded user name")
+	}
+	return nil
+}
+
 func validReference(reference, message string) error {
 	reference = strings.TrimSpace(reference)
 	if reference == "" || len(reference) > maxCredential || strings.IndexFunc(reference, unicode.IsControl) >= 0 {
 		return errors.New(message)
 	}
+	if strings.HasPrefix(reference, "vault:") {
+		parts := strings.Split(reference, ":")
+		if len(parts) != 3 || parts[1] == "" || parts[2] != "auth" || len(parts[1]) > 128 {
+			return errors.New("vault reference must be vault:<connection>:auth")
+		}
+		return nil
+	}
 	if !referencePrefix(reference) {
-		return errors.New("credential reference must use env:, file: or secret:")
+		return errors.New("credential reference must use env:, file:, secret: or vault:")
 	}
 	return nil
 }

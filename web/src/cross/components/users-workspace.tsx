@@ -25,10 +25,14 @@ export function UsersWorkspace(props: UsersWorkspaceProps) {
   // Go local mode announces only its own administration scope; the legacy
   // directory/role APIs it does not implement stay hidden there. The static
   // demo and other modes keep the existing workspace.
-  const goAccessMode = (props.authMode === 'local' || props.authMode === 'oidc') && !has('access:manage')
-    && !has('access:directory_read') && !has('access:role_assignments_manage');
-  const localAccountsMode = goAccessMode && has('access:local_users_manage');
-  const oidcAccountsMode = goAccessMode && props.authMode === 'oidc' && has('access:oidc_manage');
+  // The minimal Go screens announce their own capability and nothing else.
+  // Delegated legacy roles (for example access:roles_manage without
+  // access:manage) must keep the full directory/roles workspace.
+  const localAccountsMode = props.authMode === 'local' && has('access:local_users_manage')
+    && !has('access:manage') && !has('access:directory_read') && !has('access:role_assignments_manage');
+  const oidcAccountsMode = props.authMode === 'oidc' && has('access:oidc_manage')
+    && !has('access:manage') && !has('access:directory_read') && !has('access:role_assignments_manage');
+  const goAccessMode = localAccountsMode || oidcAccountsMode;
   const canSeeUsers = has('access:directory_read') || has('access:local_users_manage') || has('access:role_assignments_manage');
   const canSeeOidc = oidcAccountsMode;
   const canSeeReview = !goAccessMode && canSeeUsers;

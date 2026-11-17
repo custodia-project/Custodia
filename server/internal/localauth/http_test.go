@@ -51,10 +51,10 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateLocalAdministrator(ctx, "Ada.Admin", "Ada Admin", hash, []string{lab.IdentityConnection, lab.NetskopeConnection}, start); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "Ada.Admin", "Ada Admin", hash, []string{lab.IdentityConnection, lab.NetskopeConnection}, false, start); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateLocalAdministrator(ctx, "second.admin", "Second", hash, nil, start); err == nil {
+	if err = s.CreateLocalAdministrator(ctx, "second.admin", "Second", hash, nil, false, start); err == nil {
 		t.Fatal("first local administrator replaced")
 	}
 	x := &harness{t: t, store: s, now: start, ip: "127.0.0.1:50000"}

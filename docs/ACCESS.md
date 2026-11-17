@@ -28,19 +28,30 @@ pendientes.
 | `serve --auth-mode oidc` | Sesión emitida tras el flujo OIDC, o contraseña de un administrador local de emergencia. | Cuentas OIDC aprobadas, administradores locales, permisos por conexión y auditoría. |
 | `serve-lab` | Bearer aleatorio de laboratorio, sólo loopback. | Principales sintéticos y concesiones explícitas. |
 
-Todos los servidores escuchan sólo en IP numérica loopback. Eso no autentica
-al usuario. `--auth-mode` es obligatorio en serve y admite exactamente
+`serve` escucha en IP numérica loopback por defecto. En los modos `local` y
+`oidc` puede terminar TLS directamente con `--tls-cert/--tls-key`; recién
+entonces `--listen` admite una IP no loopback y `--public-origin` debe ser
+HTTPS. Sin TLS, el listener sigue siendo sólo loopback. `serve-lab` conserva
+loopback obligatorio. Escuchar en una interfaz no autentica al usuario. `--auth-mode` es obligatorio en serve y admite exactamente
 `local`, `oidc` u `ozal`; no hay modo híbrido ni valor por defecto. En modo `oidc`
 el login principal es el proveedor; la contraseña sólo autentica a un
 administrador local creado en el host, como vía de emergencia explícita. En modo `ozal`
 se exige la firma incluso con acceso directo y no se admite token de
 laboratorio, cookie de sesión local, headers de usuario/email ni login local.
-En modo `local` no se registra el receptor Ozal: una aserción, un bearer o
+El modo `ozal` conserva el gateway delante y su contrato de aserción; la
+terminación TLS directa no reemplaza esa verificación. En modo `local` no se registra el receptor Ozal: una aserción, un bearer o
 un header de usuario no autentican; sólo la cookie de sesión. En modo `oidc`
 no se registran el receptor Ozal ni el bearer de laboratorio; una aserción o
 un header de identidad no autentican. Cuando falla un modo, la petición se
 rechaza; no se prueba el otro. La instalación debe cerrar también los caminos
 directos al backend y proteger su host.
+
+## Salud y versión
+
+`GET /api/health` es público, no devuelve datos ni sesiones y responde
+`{status:"ok", version, mode}`. Lo usa el instalador y el actualizador para
+comprobar que el proceso quedó sano después de un reinicio. `custodia version`
+imprime la versión embebida en el binario.
 
 ## Modo `ozal`: contrato firmado
 

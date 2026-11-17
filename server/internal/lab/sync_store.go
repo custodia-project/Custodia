@@ -30,6 +30,7 @@ var connectionPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 const (
 	syncConnector                 = "http-inventory-v1"
 	syncConnectorCyberArkPAMSafes = "cyberark-pam-safes-v1"
+	syncConnectorWazuh            = "wazuh"
 	syncLeaseDuration             = 15 * time.Minute
 	syncDefaultPages              = 100
 	syncDefaultRecords            = 10000
@@ -41,19 +42,23 @@ const (
 // requires a numeric loopback HTTP origin; a vendor connector registered by an
 // administrator uses HTTPS and an auth plan validated by the probe package.
 type SyncSource struct {
-	ConnectionID    string   `json:"connection_id"`
-	GroupID         string   `json:"group_id"`
-	Connector       string   `json:"connector"`
-	BaseURL         string   `json:"base_url"`
-	Collection      string   `json:"collection"`
-	Scope           string   `json:"scope"`
-	Generation      string   `json:"generation"`
-	Enabled         bool     `json:"enabled"`
-	PageSize        int      `json:"page_size"`
-	MaxPages        int      `json:"max_pages"`
-	MaxRecords      int      `json:"max_records"`
-	Interval        int      `json:"interval_minutes"`
-	AuthMode        string   `json:"auth_mode"`
+	ConnectionID string `json:"connection_id"`
+	GroupID      string `json:"group_id"`
+	Connector    string `json:"connector"`
+	BaseURL      string `json:"base_url"`
+	Collection   string `json:"collection"`
+	Scope        string `json:"scope"`
+	Generation   string `json:"generation"`
+	Enabled      bool   `json:"enabled"`
+	PageSize     int    `json:"page_size"`
+	MaxPages     int    `json:"max_pages"`
+	MaxRecords   int    `json:"max_records"`
+	Interval     int    `json:"interval_minutes"`
+	AuthMode     string `json:"auth_mode"`
+	AuthUser     string `json:"auth_user"`
+	// Secret is a write-only value used only during registration; it is never
+	// serialized or stored in cleartext.
+	Secret          string   `json:"-"`
 	CredentialRef   string   `json:"-"`
 	TokenURL        string   `json:"-"`
 	ClientIDRef     string   `json:"-"`
@@ -264,12 +269,12 @@ func validLabBaseURL(raw string) error {
 func (s *Store) readableSyncSource(ctx context.Context, tx *sql.Tx, principalID int, connectionID string) (SyncSource, error) {
 	var source SyncSource
 	var enabled int
-	err := tx.QueryRowContext(ctx, `SELECT s.connection_id,s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.interval_minutes,s.created_by,s.created_at
+	err := tx.QueryRowContext(ctx, `SELECT s.connection_id,coalesce(nullif(s.group_id,''),s.connection_id),s.connector,s.base_url,s.collection,s.scope,s.generation,s.enabled,s.page_size,s.max_pages,s.max_records,s.interval_minutes,s.created_by,s.created_at
 		FROM lab_sync_sources s
 		JOIN lab_grants g ON g.connection_id=s.connection_id
 		JOIN lab_principals p ON p.id=g.principal_id AND p.enabled=1
-		WHERE p.id=? AND s.connection_id=?`, principalID, connectionID).Scan(
-		&source.ConnectionID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
+		WHERE p.id=? AND s.connection_id=? AND s.retired_at=''`, principalID, connectionID).Scan(
+		&source.ConnectionID, &source.GroupID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
 		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval, &source.CreatedBy, &source.CreatedAt,
 	)
 	source.Enabled = enabled == 1
@@ -367,7 +372,7 @@ func validateCommonConfiguration(source SyncSource, grants []string) error {
 // future connector registry while still rejecting unknown collections.
 func collectionForSync(name string) (string, bool) {
 	switch name {
-	case "users", "devices", "safes", "safe_members", "accounts", "platforms", "psm_servers", "psm_connectors", "platform_psm_links":
+	case "users", "devices", "safes", "safe_members", "accounts", "platforms", "psm_servers", "psm_connectors", "platform_psm_links", "agents", "groups":
 		return name, true
 	default:
 		return "", false
@@ -385,6 +390,8 @@ func connectorSupportsCollection(connector, collection string) bool {
 		return collection == "safes" || collection == "safe_members" || collection == "accounts" ||
 			collection == "platforms" || collection == "psm_servers" || collection == "psm_connectors" ||
 			collection == "platform_psm_links"
+	case syncConnectorWazuh:
+		return collection == "agents" || collection == "groups"
 	default:
 		return false
 	}
@@ -408,6 +415,10 @@ func (s *Store) AddHTTPSource(ctx context.Context, actor string, source SyncSour
 	source.CreatedBy = actor
 	source.CreatedAt = now.UTC().Format(time.RFC3339)
 	source.Enabled = true
+	groupID := source.GroupID
+	if groupID == "" {
+		groupID = source.ConnectionID
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -416,8 +427,8 @@ func (s *Store) AddHTTPSource(ctx context.Context, actor string, source SyncSour
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_connections(id,kind) VALUES(?,?)", source.ConnectionID, "netskope"); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,created_by,created_at)
-		VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?)`, source.ConnectionID, source.Connector, source.BaseURL, source.Collection, source.Scope, source.Generation, source.PageSize, source.MaxPages, source.MaxRecords, source.Interval, source.CreatedBy, source.CreatedAt); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,group_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,created_by,created_at)
+		VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, source.ConnectionID, groupID, source.Connector, source.BaseURL, source.Collection, source.Scope, source.Generation, source.PageSize, source.MaxPages, source.MaxRecords, source.Interval, source.CreatedBy, source.CreatedAt); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -816,6 +827,9 @@ func syncSourceSystemForConnector(connector string) string {
 	if connector == syncConnectorCyberArkPAMSafes {
 		return "cyberark"
 	}
+	if connector == syncConnectorWazuh {
+		return "wazuh"
+	}
 	// The typed UI contract groups the normalized user/device inventory under
 	// the netskope label; this does not assert a provider adapter.
 	return "netskope"
@@ -824,6 +838,9 @@ func syncSourceSystemForConnector(connector string) string {
 func syncSourceFile(connector, connectionID string) string {
 	if connector == syncConnectorCyberArkPAMSafes {
 		return "cyberark-pam-safes:" + connectionID
+	}
+	if connector == syncConnectorWazuh {
+		return "wazuh:" + connectionID
 	}
 	return "http-inventory:" + connectionID
 }

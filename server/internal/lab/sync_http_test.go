@@ -396,6 +396,9 @@ func TestSyncHTTPAllRunsScheduleAndStageHistory(t *testing.T) {
 	if code != 200 || !strings.Contains(body, `"last_status":"completed"`) || !strings.Contains(body, `"last_attempt_at"`) {
 		t.Fatal(code, body)
 	}
+	if err := s.RecordConnectionProbe(context.Background(), "lab-http-a", true, "test probe", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	code, body = syncRequest(t, h, "lab-key", "PUT", "/api/ingestion/schedules/lab-http-a", `{"interval_minutes":5}`)
 	if code != 200 || !strings.Contains(body, `"interval_minutes":5`) {
 		t.Fatal(code, body)

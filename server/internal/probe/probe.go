@@ -60,6 +60,8 @@ func ResolveCredential(reference string) (string, error) {
 			return "", errors.New("probe credential file must be an absolute local path")
 		}
 		return readSecretFile(path)
+	case strings.HasPrefix(reference, "vault:"):
+		return "", errors.New("vault references require the Custodia secret store")
 	case strings.HasPrefix(reference, "secret:"):
 		name := strings.TrimPrefix(reference, "secret:")
 		if !validReferenceName(name) {
@@ -113,10 +115,21 @@ func credentialValue(value string) (string, error) {
 // RunPlan resolves authentication outside the repository and probes every
 // allowlisted endpoint sequentially. Transport failures are reported per
 // endpoint; plan, secret, CA or authentication errors fail before a report.
+// Resolver resolves a credential reference to a value. The default resolver
+// reads env:, file: and secret: sources; Custodia passes its encrypted store
+// for vault: references.
+type Resolver func(reference string) (string, error)
+
 // Prepare resolves authentication outside the repository and builds a
 // read-only HTTP client for one validated plan. The client injects the bearer
 // token itself, so a sync adapter reusing it cannot forget authorization.
 func Prepare(ctx context.Context, plan Plan) (*http.Client, error) {
+	return PrepareWithResolver(ctx, plan, nil)
+}
+
+// PrepareWithResolver is Prepare with an explicit credential resolver. The
+// resolver runs in memory and its values are never stored in the plan.
+func PrepareWithResolver(ctx context.Context, plan Plan, resolver Resolver) (*http.Client, error) {
 	if !plan.validated {
 		return nil, errors.New("probe plan is not validated")
 	}
@@ -142,20 +155,34 @@ func Prepare(ctx context.Context, plan Plan) (*http.Client, error) {
 		},
 		Timeout: plan.Timeout,
 	}
+	resolve := ResolveCredential
+	if resolver != nil {
+		resolve = resolver
+	}
 	authHeader := ""
 	switch plan.AuthMode {
 	case AuthBearer:
-		token, err := ResolveCredential(plan.CredentialRef)
+		token, err := resolve(plan.CredentialRef)
+		if err != nil {
+			return nil, err
+		}
+		authHeader = "Bearer " + token
+	case AuthBasicExchange:
+		password, err := resolve(plan.CredentialRef)
+		if err != nil {
+			return nil, err
+		}
+		token, err := fetchBasicExchangeToken(ctx, client, plan, plan.AuthUser, password)
 		if err != nil {
 			return nil, err
 		}
 		authHeader = "Bearer " + token
 	case AuthOAuthClientCreds:
-		clientID, err := ResolveCredential(plan.ClientIDRef)
+		clientID, err := resolve(plan.ClientIDRef)
 		if err != nil {
 			return nil, err
 		}
-		secret, err := ResolveCredential(plan.ClientSecretRef)
+		secret, err := resolve(plan.ClientSecretRef)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +218,13 @@ func (t bearerTransport) RoundTrip(request *http.Request) (*http.Response, error
 // allowlisted endpoint sequentially. Transport failures are reported per
 // endpoint; plan, secret, CA or authentication errors fail before a report.
 func RunPlan(ctx context.Context, plan Plan) (Report, error) {
-	client, err := Prepare(ctx, plan)
+	return RunPlanWithResolver(ctx, plan, nil)
+}
+
+// RunPlanWithResolver probes every endpoint with the given credential
+// resolver. It is the same read-only plan and transport as RunPlan.
+func RunPlanWithResolver(ctx context.Context, plan Plan, resolver Resolver) (Report, error) {
+	client, err := PrepareWithResolver(ctx, plan, resolver)
 	if err != nil {
 		return Report{}, err
 	}
@@ -204,6 +237,37 @@ func RunPlan(ctx context.Context, plan Plan) (Report, error) {
 		report.Endpoints = append(report.Endpoints, probeEndpoint(ctx, client, base, endpoint, plan.Timeout))
 	}
 	return report, nil
+}
+
+func fetchBasicExchangeToken(ctx context.Context, client *http.Client, plan Plan, user, password string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(plan.BaseURL, "/")+"/security/user/authenticate", nil)
+	if err != nil {
+		return "", errors.New("basic exchange request is invalid")
+	}
+	request.SetBasicAuth(user, password)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return "", errors.New("basic exchange login failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		return "", fmt.Errorf("basic exchange login returned %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxBodyBytes))
+	if err != nil {
+		return "", errors.New("basic exchange response could not be read")
+	}
+	var payload struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	if err := decoder.Decode(&payload); err != nil || payload.Data.Token == "" || len(payload.Data.Token) > maxCredentialBytes {
+		return "", errors.New("basic exchange response did not contain a token")
+	}
+	return payload.Data.Token, nil
 }
 
 func fetchOAuthToken(ctx context.Context, client *http.Client, plan Plan, clientID, secret string) (string, error) {
@@ -335,6 +399,20 @@ func probeEndpoint(ctx context.Context, client *http.Client, base, endpoint stri
 	key := countKey(endpoint)
 	raw, found := payload[key]
 	if !found || len(raw) == 0 || string(raw) == "null" {
+		// Wazuh wraps read-only collections in data.affected_items and reports
+		// the collection total. The probe accepts only that shape as a
+		// fallback; provider-specific adapters still parse the full contract.
+		var wazuh struct {
+			Affected []json.RawMessage `json:"affected_items"`
+			Total    int               `json:"total_affected_items"`
+		}
+		if data, ok := payload["data"]; ok && json.Unmarshal(data, &wazuh) == nil && wazuh.Affected != nil {
+			result.Objects = len(wazuh.Affected)
+			if wazuh.Total > result.Objects {
+				result.Objects = wazuh.Total
+			}
+			return result
+		}
 		result.Error = "invalid_payload"
 		return result
 	}

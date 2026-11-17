@@ -21,6 +21,7 @@ type Config struct {
 	PublicOrigin   string                       `json:"public_origin"`
 	PublicKeyFiles []string                     `json:"public_key_files"`
 	Keys           map[string]ed25519.PublicKey `json:"-"`
+	Version        string                       `json:"-"`
 }
 
 func origin(value string, loopbackHTTP bool) bool {

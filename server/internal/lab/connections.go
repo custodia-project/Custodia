@@ -83,6 +83,7 @@ func (source SyncSource) probePlan(endpoints []string) (probe.Plan, error) {
 	return probe.NewPlan(probe.Config{
 		BaseURL:         source.BaseURL,
 		AuthMode:        source.AuthMode,
+		AuthUser:        source.AuthUser,
 		CredentialRef:   source.CredentialRef,
 		TokenURL:        source.TokenURL,
 		ClientIDRef:     source.ClientIDRef,
@@ -149,6 +150,11 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 	if !s.IsAdministrator(ctx, principal) {
 		return ConnectionRegistration{}, ErrDenied
 	}
+	// The group ID does not exist yet, so any client-supplied vault: reference
+	// would name another connection's secret. Only the server assigns vault:.
+	if err := checkOwnVaultReference("", source.CredentialRef, source.ClientIDRef, source.ClientSecretRef); err != nil {
+		return ConnectionRegistration{}, err
+	}
 	descriptor, found := connectors.Get(source.Connector)
 	if !found {
 		return ConnectionRegistration{}, errors.New("unsupported connector")
@@ -179,12 +185,26 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 		}
 	}
 	groupID := generatedConnectionIDFor(source.Connector, longest+1)
+	if source.Secret != "" {
+		if normalizedAuthMode(source.AuthMode) != "bearer" && normalizedAuthMode(source.AuthMode) != "basic-exchange" {
+			return ConnectionRegistration{}, errors.New("encrypted secrets are supported for bearer and basic-exchange authentication")
+		}
+		if source.CredentialRef != "" {
+			return ConnectionRegistration{}, errors.New("send either a secret or a credential reference, not both")
+		}
+		if s.masterKey == nil {
+			return ConnectionRegistration{}, ErrNoMasterKey
+		}
+	}
 	grants := []string{principal.Subject}
 	children := make([]SyncSource, 0, len(collections))
 	for _, collection := range collections {
 		child := source
 		child.GroupID = groupID
 		child.Collection = collection
+		if source.Secret != "" {
+			child.CredentialRef = "vault:" + groupID + ":auth"
+		}
 		if len(collections) == 1 {
 			child.ConnectionID = groupID
 		} else {
@@ -218,11 +238,11 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 		if _, err = tx.ExecContext(ctx, "INSERT INTO lab_connections(id,kind) VALUES(?,?)", child.ConnectionID, "netskope"); err != nil {
 			return ConnectionRegistration{}, fmt.Errorf("connection ID already exists or is invalid")
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,group_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,auth_mode,credential_ref,token_url,client_id_ref,client_secret_ref,scopes_json,ca_file,client_cert_file,client_key_file,created_by,created_at)
-			VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		if _, err = tx.ExecContext(ctx, `INSERT INTO lab_sync_sources(connection_id,group_id,connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,auth_mode,auth_user,credential_ref,token_url,client_id_ref,client_secret_ref,scopes_json,ca_file,client_cert_file,client_key_file,created_by,created_at)
+			VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			child.ConnectionID, child.GroupID, child.Connector, child.BaseURL, child.Collection, child.Scope, child.Generation,
 			child.PageSize, child.MaxPages, child.MaxRecords, child.Interval,
-			normalizedAuthMode(child.AuthMode), child.CredentialRef, child.TokenURL, child.ClientIDRef, child.ClientSecretRef,
+			normalizedAuthMode(child.AuthMode), child.AuthUser, child.CredentialRef, child.TokenURL, child.ClientIDRef, child.ClientSecretRef,
 			string(scopes), child.CAFile, child.ClientCertFile, child.ClientKeyFile, child.CreatedBy, child.CreatedAt); err != nil {
 			return ConnectionRegistration{}, err
 		}
@@ -230,6 +250,11 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 			return ConnectionRegistration{}, err
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO lab_sync_grants(principal_id,connection_id,can_run) VALUES(?,?,1)", principal.ID, child.ConnectionID); err != nil {
+			return ConnectionRegistration{}, err
+		}
+	}
+	if source.Secret != "" {
+		if _, err = putConnectionSecretTx(ctx, tx, s.masterKey, principal, groupID, source.Secret, now); err != nil {
 			return ConnectionRegistration{}, err
 		}
 	}
@@ -241,8 +266,8 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 		"group_id": groupID, "connection_ids": childIDs, "connector": source.Connector,
 		"base_url": source.BaseURL, "collections": collections, "scope": source.Scope,
 		"generation": source.Generation, "auth_mode": normalizedAuthMode(source.AuthMode),
-		"credential_configured": source.CredentialRef != "", "ca_configured": source.CAFile != "",
-		"mtls_configured": source.ClientCertFile != "",
+		"credential_configured": source.CredentialRef != "" || source.Secret != "", "secret_configured": source.Secret != "",
+		"ca_configured": source.CAFile != "", "mtls_configured": source.ClientCertFile != "",
 	})
 	if _, err = tx.ExecContext(ctx, "INSERT INTO lab_audit(actor,action,before_json,after_json,at) VALUES(?,'connection_register','{}',?,?)", actor, after, now.UTC().Format(time.RFC3339)); err != nil {
 		return ConnectionRegistration{}, err
@@ -262,6 +287,13 @@ func (s *Store) RegisterConnection(ctx context.Context, actor string, principal 
 func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connectionID string, now time.Time) (probe.Report, error) {
 	if !s.IsAdministrator(ctx, principal) {
 		return probe.Report{}, ErrDenied
+	}
+	var active int
+	if err := s.DB.QueryRowContext(ctx, "SELECT count(*) FROM lab_sync_sources WHERE group_id=? AND retired_at=''", connectionID).Scan(&active); err != nil {
+		return probe.Report{}, err
+	}
+	if active == 0 {
+		return probe.Report{}, ErrConnectionClosed
 	}
 	sources, err := loadGroupSources(ctx, s.DB, connectionID)
 	if err != nil {
@@ -297,7 +329,7 @@ func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connec
 	if err != nil {
 		return probe.Report{}, err
 	}
-	report, err := probe.RunPlan(ctx, plan)
+	report, err := probe.RunPlanWithResolver(ctx, plan, func(reference string) (string, error) { return s.ResolveReference(ctx, first.GroupID, reference) })
 	if err != nil {
 		return probe.Report{}, err
 	}
@@ -307,6 +339,9 @@ func (s *Store) ProbeConnection(ctx context.Context, principal Principal, connec
 		"endpoints": report.Endpoints,
 	})
 	if _, err = s.DB.ExecContext(ctx, "INSERT INTO lab_audit(actor,action,before_json,after_json,at) VALUES(?,'connection_probe','{}',?,?)", principal.Actor(), after, now.UTC().Format(time.RFC3339)); err != nil {
+		return probe.Report{}, err
+	}
+	if err = s.RecordConnectionProbe(ctx, first.GroupID, report.Failed() == 0, fmt.Sprintf("%d endpoints, %d with errors", len(report.Endpoints), report.Failed()), now); err != nil {
 		return probe.Report{}, err
 	}
 	return report, nil
@@ -363,6 +398,7 @@ func syncSourceJSON(source SyncSource) map[string]any {
 		"base_url": source.BaseURL, "collection": source.Collection,
 		"scope": source.Scope, "generation": source.Generation,
 		"auth_mode":             normalizedAuthMode(source.AuthMode),
+		"auth_user":             source.AuthUser,
 		"credential_configured": source.CredentialRef != "",
 		"ca_configured":         source.CAFile != "",
 		"mtls_configured":       source.ClientCertFile != "" && source.ClientKeyFile != "",

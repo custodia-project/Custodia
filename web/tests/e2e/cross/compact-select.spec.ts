@@ -26,6 +26,9 @@ test('CompactSelect keeps the Custodia trigger and menu geometry', async ({ page
   const menu = page.locator('.custom-select-menu');
   await expect(menu).toBeVisible();
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  // Measure the settled geometry, not an intermediate frame of the 140 ms
+  // entrance animation declared by .custom-select-menu.
+  await menu.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)));
   const menuBox = await menu.boundingBox();
   // Same offset (5px) and minimum width (max(150px, trigger)) as before.
   expect(Math.abs(menuBox!.y - (triggerBox!.y + triggerBox!.height + 5))).toBeLessThan(2);

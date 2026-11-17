@@ -367,6 +367,22 @@ construye el binario y la web, crea el administrador con la contraseña por
 stdin y recorre en Chromium login, contraseña temporal y revocación por
 deshabilitado, sin mocks ni respuestas interceptadas.
 
+## Secretos de conexión y clave maestra
+
+`init` genera `master.key` (32 bytes, 0600) en el directorio de datos. `serve`
+la carga por defecto desde `<dir>/master.key` o desde `--master-key RUTA`. Los
+secretos escritos en la consola se guardan cifrados con XChaCha20-Poly1305 en
+SQLite y nunca se devuelven; las referencias `env:`, `file:` y `secret:`
+siguen admitidas. El backup de SQLite no incluye la clave: conservarla por
+separado y restaurarla antes de usar conexiones con secreto cifrado. Sin
+clave, esas conexiones fallan cerradas; el resto del producto sigue
+operativo. Contrato y endpoints en
+[CONNECTORS.md](../docs/CONNECTORS.md#secretos-de-conexión-y-gestión).
+
+## Instalación y TLS
+
+`serve` acepta `--tls-cert/--tls-key` para terminar TLS en local/OIDC; sin TLS sigue en loopback. `GET /api/health` es público y devuelve versión y modo. El instalador, layout, firma de releases y desinstalación están en [INSTALL.md](../docs/INSTALL.md). `custodia version` imprime la versión embebida.
+
 ## Modo OIDC (proveedor de identidad)
 
 `serve` también acepta `--auth-mode oidc`; el modo es explícito y no hay

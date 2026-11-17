@@ -22,7 +22,7 @@ func TestLocalAuthMigrationIsIdempotent(t *testing.T) {
 		t.Fatal("second migrate failed", err)
 	}
 	hash := "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGg"
-	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, nil, now); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, nil, false, now); err != nil {
 		t.Fatal(err)
 	}
 	// A database that lost only the version row re-applies migration 9 without
@@ -78,7 +78,7 @@ func TestLocalAuthMigrationUpgradesVersionEight(t *testing.T) {
 		t.Fatal("existing observations lost", observations, err)
 	}
 	hash := "$argon2id$v=19$m=1024,t=1,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGg"
-	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, []string{IdentityConnection}, now); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, []string{IdentityConnection}, false, now); err != nil {
 		t.Fatal("upgraded database cannot bootstrap the first local administrator", err)
 	}
 }

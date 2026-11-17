@@ -5,6 +5,7 @@ import { hasWorkspaceAccess, type WorkspaceView } from '../lib/workspaces';
 import { HOME_WHEEL_CENTER, radialOrbitLayout, wheelPercent, wheelRay, type RadialWheelNode, type WheelPoint } from '../lib/home-wheel';
 import './home-workspace.css';
 import { t } from '../i18n/index.ts';
+import { CATALOG_BY_ID } from '../lib/workspace-catalog.ts';
 
 type HomeWorkspaceProps = {
   authStatus: AuthStatus;
@@ -82,12 +83,19 @@ export const HOME_SECTIONS: readonly { id: HomeSection; label: string }[] = [
 /* One list drives both the left actions (grouped by section) and the wheel
    (platform nodes plus the transversal core); a tool without a `view` is
    shown as coming soon. Adding a tool here places it on both. */
-export const HOME_TOOLS: readonly HomeTool[] = [
+const ALL_HOME_TOOLS: readonly HomeTool[] = [
   { id: 'people', section: 'transversal', label: t('Conexiones'), detail: t('Vista del alcance de cada persona en las herramientas'), title: t('Abrir Conexiones para ver el alcance de cada persona en las herramientas, sus registros relacionados y la cobertura de cliente Netskope'), logo: CustodiaMark, view: 'person' },
   { id: 'cyberark', section: 'platform', label: t('CyberArk'), detail: t('Gestión de accesos privilegiados'), title: t('Abrir el tablero, inventario y accesos de CyberArk'), logo: CyberArkLogo, view: 'general' },
   { id: 'netskope', section: 'platform', label: t('Netskope'), detail: t('Visibilidad de equipos, usuarios y alertas de fuga de datos'), title: t('Abrir el resumen y el inventario de Netskope'), logo: NetskopeLogo, view: 'netskope' },
   { id: 'bigid', section: 'platform', label: t('BigID DSPM'), detail: t('Descubrimiento y postura de seguridad de datos'), title: t('BigID DSPM · Próximamente'), logo: BigIdLogo },
 ];
+
+const FULL_PROFILE = import.meta.env.VITE_DEMO === '1' || import.meta.env.VITE_FULL === '1';
+export const HOME_TOOLS: readonly HomeTool[] = ALL_HOME_TOOLS.filter((tool) => {
+  if (FULL_PROFILE) return true;
+  if (tool.id === 'people' || tool.id === 'netskope') return Boolean(CATALOG_BY_ID[tool.view as WorkspaceView]);
+  return tool.id === 'cyberark';
+});
 
 export function homeToolsForSection(section: HomeSection): readonly HomeTool[] {
   return HOME_TOOLS.filter((tool) => tool.section === section);

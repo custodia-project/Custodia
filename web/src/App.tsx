@@ -304,7 +304,7 @@ export function App() {
           key={workspaceView}
           title={workspaceLabels[workspaceView]}
           description={WORKSPACE_DESCRIPTIONS[workspaceView]}
-          help={CATALOG_BY_ID[workspaceView].introHelp}
+          help={CATALOG_BY_ID[workspaceView]?.introHelp}
           latestRun={latestRun || null}
           showRunSummary={workspaceView === 'safes'}
         />

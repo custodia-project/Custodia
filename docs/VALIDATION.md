@@ -81,3 +81,13 @@ se construye con ejemplos nuevos y materiales cuya reutilización esté clara.
 La documentación nueva contiene sólo conceptos, referencias de código y
 datasets ficticios. Los contratos de tenants, tickets corporativos, grupos,
 dominios y evidencias privadas permanecen fuera de la presentación pública.
+
+
+## Clave maestra y backups (16/11)
+
+`init` crea `master.key` (32 bytes, 0600) junto a la base. El backup SQLite no
+la incluye a propósito: un backup restaurado en otro host no descifra los
+secretos de conexión hasta copiar la clave por un canal separado. La consola
+advierte esta condición al crear un backup y `restore` no toca la clave del
+host destino. Sin clave, el producto sigue sirviendo inventario y lectura,
+pero las conexiones con secreto cifrado fallan cerradas.

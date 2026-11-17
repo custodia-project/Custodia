@@ -11,9 +11,11 @@ const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 const outIndex = args.indexOf('--out');
 const outputRoot = resolve(outIndex >= 0 ? args[outIndex + 1] : join(root, 'artifacts'));
+const keyIndex = args.indexOf('--signing-key');
+const signingKey = keyIndex >= 0 ? resolve(args[keyIndex + 1]) : null;
 const version = process.env.CUSTODIA_VERSION || '0.0.0-dev';
 const platform = process.platform;
-const architecture = process.arch;
+const architecture = process.arch === 'x64' ? 'amd64' : process.arch;
 const packageName = `custodia-${version}-${platform}-${architecture}`;
 const stagingRoot = await mkdtemp(join(tmpdir(), 'custodia-package-'));
 const packageDir = join(stagingRoot, packageName);
@@ -38,7 +40,7 @@ try {
     cwd: root, env: { ...process.env, VITE_DEMO: '0' }, stdio: 'inherit',
   });
   const binary = join(packageDir, platform === 'win32' ? 'custodia.exe' : 'custodia');
-  execFileSync('go', ['build', '-trimpath', '-o', binary, './cmd/custodia'], {
+  execFileSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version} -X 'main.releasePublicKey=${process.env.CUSTODIA_RELEASE_PUBLIC_KEY || ''}'`, '-o', binary, './cmd/custodia'], {
     cwd: join(root, 'server'), env: { ...process.env, CGO_ENABLED: '0' }, stdio: 'inherit',
   });
   await stat(join(webDir, 'index.html'));
@@ -66,6 +68,9 @@ try {
     files,
   }, null, 2)}\n`;
   await writeFile(join(packageDir, 'manifest.json'), manifest, { flag: 'wx' });
+  if (signingKey) {
+    execFileSync('ssh-keygen', ['-Y', 'sign', '-f', signingKey, '-n', 'custodia-release', join(packageDir, 'manifest.json')], { stdio: 'inherit' });
+  }
 
   const destination = join(outputRoot, packageName);
   await mkdir(outputRoot, { recursive: true });

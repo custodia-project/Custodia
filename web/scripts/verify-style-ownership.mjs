@@ -15,6 +15,7 @@ const ownedStyles = [
   ['cross/components/connection-inventory-workspace.tsx', 'cross/components/connection-inventory-workspace.css'],
   ['cross/components/tool-inventory-workspace.tsx', 'cross/components/tool-inventory-workspace.css'],
   ['cross/components/oidc-settings.tsx', 'cross/components/oidc-settings.css'],
+  ['cross/components/system-workspace.tsx', 'cross/components/system-workspace.css'],
   ['cross/components/sync-schedule-view.tsx', 'cross/components/sync-schedule-view.css'],
   ['cross/components/stale-data-banner.tsx', 'cross/components/stale-data-banner.css'],
   ['cyberark/identity_administration/components/identity-drawer.tsx', 'cyberark/identity_administration/components/identity-drawer.css'],

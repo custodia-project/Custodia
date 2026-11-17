@@ -238,6 +238,9 @@ function officeTimeline(url: URL) {
 
 test('NSK-EXP-OFFICE-002: the daily timeline filters by company and overlays one person, with gaps and thin days marked', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  // The fixture timeline is October 2026 and the calendar opens on "today";
+  // pin the clock so the expected month does not drift with the real date.
+  await page.clock.setFixedTime(new Date('2026-10-19T12:00:00Z'));
   await mockAuthenticatedApp(page, { permissions: ['inventory:read', 'netskope:read', 'netskope:uba_read'] });
   await mockEmptyScore(page);
   await page.route('**/api/cmdb/netskope/experience/office?**', (route) => route.fulfill({ json: officeExperience() }));

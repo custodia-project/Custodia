@@ -24,7 +24,7 @@ var allowedWorkspaces = map[string]bool{
 	"identityUsers": true, "identityGroups": true, "identityRoles": true,
 	"identityFederations": true, "sia": true, "siaResources": true,
 	"siaDatabaseAccounts": true, "siaConnectors": true, "identity": true,
-	"assets": true, "inventory": true, "users": true, "activity": true,
+	"assets": true, "inventory": true, "users": true, "activity": true, "system": true,
 	"help": true, "pamHealth": true, "netskopeInventory": true,
 	"netskopeUsers": true, "netskopeDevices": true, "netskopeDlp": true,
 	"netskopePosture": true, "netskopeOperations": true, "netskopeOfficeExperience": true,

@@ -53,6 +53,18 @@ test('a bearer tenant builds a request without ever sending the credential value
   assert.equal(JSON.stringify(draft.request).includes('super-secret'), false);
 });
 
+test('a bearer secret is sent write-only and never as a reference', () => {
+  const draft = buildConnectionRequest(form({ credentialRef: '', secret: 'http secret value' }), cyberArk);
+  assert.equal(draft.ok, true);
+  if (!draft.ok) return;
+  assert.equal(draft.request.secret, 'http secret value');
+  assert.equal('credential_ref' in draft.request, false);
+  const both = buildConnectionRequest(form({ secret: 'http secret value' }), cyberArk);
+  assert.equal(both.ok, false);
+  const multiline = buildConnectionRequest(form({ credentialRef: '', secret: 'line\nbreak' }), cyberArk);
+  assert.equal(multiline.ok, false);
+});
+
 test('one tenant connection may collect several collections with one credential', () => {
   const draft = buildConnectionRequest(form({ collections: ['safes', 'safe_members', 'accounts'] }), cyberArk);
   assert.equal(draft.ok, true);

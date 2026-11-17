@@ -181,7 +181,7 @@ func newOIDCHarness(t *testing.T) *oidcHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, []string{lab.IdentityConnection, lab.NetskopeConnection}, now); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", hash, []string{lab.IdentityConnection, lab.NetskopeConnection}, false, now); err != nil {
 		t.Fatal(err)
 	}
 	x := &oidcHarness{t: t, store: s, now: now, ip: "127.0.0.1:50000", idp: newFakeIDP(t), origin: origin}

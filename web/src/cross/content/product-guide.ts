@@ -194,6 +194,7 @@ export const GUIDE_CONTENT: Record<GuideSectionId, GuideSectionContent> = {
     links: [
       { view: 'users', label: t('Abrir Usuarios y permisos') },
       { view: 'activity', label: t('Abrir Actividad') },
+      { view: 'system', label: t('Abrir Sistema') },
     ],
   },
   'casos-de-uso': {

@@ -299,7 +299,7 @@ func (s *Store) loadSyncSource(ctx context.Context, connectionID string) (SyncSo
 }
 
 const syncSourceColumns = `SELECT connection_id,coalesce(group_id,connection_id),connector,base_url,collection,scope,generation,enabled,page_size,max_pages,max_records,interval_minutes,
- coalesce(auth_mode,'none'),coalesce(credential_ref,''),coalesce(token_url,''),coalesce(client_id_ref,''),coalesce(client_secret_ref,''),
+ coalesce(auth_mode,'none'),coalesce(auth_user,''),coalesce(credential_ref,''),coalesce(token_url,''),coalesce(client_id_ref,''),coalesce(client_secret_ref,''),
  coalesce(scopes_json,'[]'),coalesce(ca_file,''),coalesce(client_cert_file,''),coalesce(client_key_file,''),created_by,created_at
 	FROM lab_sync_sources`
 
@@ -333,7 +333,7 @@ func scanSyncSource(row rowScanner) (SyncSource, error) {
 	var scopes string
 	err := row.Scan(&source.ConnectionID, &source.GroupID, &source.Connector, &source.BaseURL, &source.Collection, &source.Scope, &source.Generation,
 		&enabled, &source.PageSize, &source.MaxPages, &source.MaxRecords, &source.Interval,
-		&source.AuthMode, &source.CredentialRef, &source.TokenURL, &source.ClientIDRef, &source.ClientSecretRef,
+		&source.AuthMode, &source.AuthUser, &source.CredentialRef, &source.TokenURL, &source.ClientIDRef, &source.ClientSecretRef,
 		&scopes, &source.CAFile, &source.ClientCertFile, &source.ClientKeyFile, &source.CreatedBy, &source.CreatedAt)
 	if err != nil {
 		return SyncSource{}, err

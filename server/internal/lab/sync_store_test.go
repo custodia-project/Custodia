@@ -819,6 +819,9 @@ func TestSyncScheduleUpdateAndCapabilities(t *testing.T) {
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
 	s, p := newSyncStore(t, now)
 	addSyncSource(t, s, p, "lab-http-a", "users", "scope-a", now)
+	if err := s.RecordConnectionProbe(ctx, "lab-http-a", true, "test probe", now); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SetSyncSchedule(ctx, p, "lab-http-a", 15, now); err != nil {
 		t.Fatal(err)
 	}

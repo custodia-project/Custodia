@@ -254,3 +254,61 @@ func TestNewPlanValidatesAuthModes(t *testing.T) {
 		t.Fatal("plan leaked key material")
 	}
 }
+
+func TestBasicExchangeLoginAndBearerInjection(t *testing.T) {
+	var logins, reads int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/security/user/authenticate":
+			if user, password, ok := r.BasicAuth(); !ok || user != "custodia-reader" || password != "reader-password" {
+				http.Error(w, "bad credentials", 401)
+				return
+			}
+			logins++
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"token":"short-lived-token"},"error":0}`))
+		case "/agents":
+			reads++
+			if r.Header.Get("Authorization") != "Bearer short-lived-token" {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"data":{"affected_items":[],"total_affected_items":0,"total_failed_items":0},"error":0}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("WAZUH_READER_PASSWORD", "reader-password")
+	plan, err := NewPlan(Config{
+		BaseURL: server.URL, AuthMode: "basic-exchange", AuthUser: "custodia-reader",
+		CredentialRef: "env:WAZUH_READER_PASSWORD", Endpoints: []string{"/agents"}, Authorized: true, CAFile: tlsCA(t, server),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := Prepare(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Get(server.URL + "/agents")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 || logins != 1 || reads != 1 {
+		t.Fatal(response.StatusCode, logins, reads)
+	}
+}
+
+func TestBasicExchangeRequiresUserAndReference(t *testing.T) {
+	for _, config := range []Config{
+		{BaseURL: "https://wazuh.example:55000", AuthMode: "basic-exchange", CredentialRef: "env:PASSWORD", Endpoints: []string{"/agents"}, Authorized: true},
+		{BaseURL: "https://wazuh.example:55000", AuthMode: "basic-exchange", AuthUser: "reader", Endpoints: []string{"/agents"}, Authorized: true},
+	} {
+		if _, err := NewPlan(config); err == nil {
+			t.Fatal("incomplete basic-exchange plan accepted")
+		}
+	}
+}

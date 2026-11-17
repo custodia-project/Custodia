@@ -40,6 +40,9 @@ const (
 // CyberArkPAM is the implemented read-only PAM connector.
 const CyberArkPAM = "cyberark-pam-safes-v1"
 
+// Wazuh is the implemented read-only Wazuh manager connector.
+const Wazuh = "wazuh"
+
 // HTTPInventory is the synthetic normalized connector used by the laboratory
 // and the browser gate. It is not a vendor connector.
 const HTTPInventory = "http-inventory-v1"
@@ -145,13 +148,16 @@ var registry = []Descriptor{
 		Notes:        "No Custodia contract. Requires a customer appliance or tenant to validate its REST API before implementation.",
 	},
 	{
-		ID:           "wazuh",
-		Name:         "Wazuh",
-		Vendor:       "Wazuh",
-		Category:     "SIEM/XDR",
-		Status:       StatusPlanned,
-		Distribution: DistributionOpenSource,
-		Notes:        "Open-source priority candidate. Server REST API to be verified against a self-hosted instance before a contract is approved.",
+		ID:             Wazuh,
+		Name:           "Wazuh",
+		Vendor:         "Wazuh",
+		Category:       "SIEM/XDR",
+		Status:         StatusAvailable,
+		Distribution:   DistributionOpenSource,
+		AuthModes:      []string{"basic-exchange"},
+		Collections:    []string{"agents", "groups"},
+		ProbeEndpoints: []string{"/agents", "/groups", "/manager/info"},
+		Notes:          "Read-only agent and group inventory from the Wazuh manager API. Alerts live in the indexer and are outside this connector.",
 	},
 	{
 		ID:           "fleet-osquery",

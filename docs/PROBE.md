@@ -35,7 +35,7 @@ configurado.
 |---|---|
 | `BaseURL` | `https://` absoluta, sin usuario, query ni fragmento; admite prefijo de path (`/PasswordVault`). |
 | `Authorized` | Debe ser `true`; representa autorización explícita del dueño. |
-| `AuthMode` | `bearer`, `oauth-client-credentials` o `mtls`. |
+| `AuthMode` | `bearer`, `basic-exchange`, `oauth-client-credentials` o `mtls`. |
 | `CredentialRef` | Bearer: referencia `env:`, `file:` o `secret:`; nunca un valor. |
 | `TokenURL` | OAuth: endpoint HTTPS del token, sin query ni fragmento. |
 | `ClientIDRef` / `ClientSecretRef` | OAuth: referencias `env:`, `file:` o `secret:`; nunca valores. |
@@ -54,6 +54,9 @@ El plan resultante es saneado y puede registrarse sin exponer credenciales.
   regular, no symlink y acotado. `secret:` no usa el repositorio.
 - TLS verificado con mínimo TLS 1.2; CA adicional por archivo, sin
   `InsecureSkipVerify` ni proxy implícito.
+- Basic exchange: `POST /security/user/authenticate` con Basic auth y un
+  usuario no secreto (`--auth-user`); el JWT se inyecta como Bearer y sólo
+  vive en memoria. Wazuh usa este modo.
 - OAuth client-credentials: POST `grant_type=client_credentials` al
   `TokenURL`, `client_id`/`client_secret` resueltos por referencia y scopes
   opcionales; sólo se acepta `token_type=Bearer`.

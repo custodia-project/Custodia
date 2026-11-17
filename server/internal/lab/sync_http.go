@@ -34,6 +34,19 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 		send(200, map[string]any{"rows": connectors.List()})
 		return true
 	case path == "connections":
+		if r.Method == "GET" {
+			groups, err := s.ListConnectionGroups(r.Context(), principal)
+			if err != nil {
+				if errors.Is(err, ErrDenied) {
+					fail(403, "Sólo un administrador puede ver las conexiones.")
+				} else {
+					fail(503, "No se pudieron consultar las conexiones.")
+				}
+				return true
+			}
+			send(200, map[string]any{"rows": groups})
+			return true
+		}
 		if r.Method != "POST" {
 			fail(405, "Alta de conexiones por POST.")
 			return true
@@ -50,7 +63,9 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			Scope           string   `json:"scope"`
 			Generation      string   `json:"generation"`
 			AuthMode        string   `json:"auth_mode"`
+			AuthUser        string   `json:"auth_user"`
 			CredentialRef   string   `json:"credential_ref"`
+			Secret          string   `json:"secret"`
 			TokenURL        string   `json:"token_url"`
 			ClientIDRef     string   `json:"client_id_ref"`
 			ClientSecretRef string   `json:"client_secret_ref"`
@@ -71,8 +86,8 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 		}
 		registration, err := s.RegisterConnection(r.Context(), principal.Actor(), principal, SyncSource{
 			Connector: input.Connector, BaseURL: input.BaseURL, Collection: input.Collection,
-			Scope: input.Scope, Generation: input.Generation, AuthMode: input.AuthMode,
-			CredentialRef: input.CredentialRef, TokenURL: input.TokenURL,
+			Scope: input.Scope, Generation: input.Generation, AuthMode: input.AuthMode, AuthUser: input.AuthUser,
+			CredentialRef: input.CredentialRef, Secret: input.Secret, TokenURL: input.TokenURL,
 			ClientIDRef: input.ClientIDRef, ClientSecretRef: input.ClientSecretRef,
 			Scopes: input.Scopes, CAFile: input.CAFile,
 			ClientCertFile: input.ClientCertFile, ClientKeyFile: input.ClientKeyFile,
@@ -91,6 +106,7 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 		response := syncSourceJSON(first)
 		response["group_id"] = registration.GroupID
 		response["collections"] = registration.Collections
+		response["secret_configured"] = input.Secret != ""
 		connections := make([]map[string]any, 0, len(registration.Connections))
 		for _, child := range registration.Connections {
 			connections = append(connections, syncSourceJSON(child))
@@ -356,6 +372,92 @@ func (s *Store) serveSyncAPI(w http.ResponseWriter, r *http.Request, current tim
 			return true
 		}
 		send(200, map[string]any{"rows": syncStageLatestJSON(schedules, parts[0])})
+		return true
+	case strings.HasPrefix(path, "connections/") && (strings.HasSuffix(path, "/pause") || strings.HasSuffix(path, "/resume") || strings.HasSuffix(path, "/retire")):
+		action := ""
+		connectionID := ""
+		for _, candidate := range []string{"pause", "resume", "retire"} {
+			suffix := "/" + candidate
+			if strings.HasSuffix(path, suffix) {
+				action = candidate
+				connectionID = strings.TrimSuffix(strings.TrimPrefix(path, "connections/"), suffix)
+			}
+		}
+		if r.Method != "POST" || connectionID == "" || strings.Contains(connectionID, "/") {
+			fail(405, "Usá POST para administrar la conexión.")
+			return true
+		}
+		var err error
+		switch action {
+		case "pause":
+			err = s.SetConnectionEnabled(r.Context(), principal, connectionID, false, current)
+		case "resume":
+			err = s.SetConnectionEnabled(r.Context(), principal, connectionID, true, current)
+		case "retire":
+			err = s.RetireConnection(r.Context(), principal, connectionID, current)
+		}
+		if err != nil {
+			connectionError(fail, err)
+			return true
+		}
+		send(200, map[string]any{"group_id": connectionID, "action": action})
+		return true
+	case strings.HasPrefix(path, "connections/") && strings.HasSuffix(path, "/secret"):
+		if r.Method != "POST" {
+			fail(405, "La rotación de secretos usa POST.")
+			return true
+		}
+		connectionID := strings.TrimSuffix(strings.TrimPrefix(path, "connections/"), "/secret")
+		if connectionID == "" || strings.Contains(connectionID, "/") {
+			fail(404, "Conexión no encontrada.")
+			return true
+		}
+		var input struct {
+			Secret string `json:"secret"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			fail(400, "Secreto inválido.")
+			return true
+		}
+		version, err := s.PutConnectionSecret(r.Context(), principal, connectionID, input.Secret, current)
+		if err != nil {
+			connectionError(fail, err)
+			return true
+		}
+		send(200, map[string]any{"version": version, "secret_configured": true})
+		return true
+	case strings.HasPrefix(path, "connections/") && !strings.Contains(strings.TrimPrefix(path, "connections/"), "/"):
+		if r.Method != "PUT" {
+			fail(405, "La edición de conexiones usa PUT.")
+			return true
+		}
+		connectionID := strings.TrimPrefix(path, "connections/")
+		var input struct {
+			BaseURL       string `json:"base_url"`
+			AuthMode      string `json:"auth_mode"`
+			CredentialRef string `json:"credential_ref"`
+			Secret        string `json:"secret"`
+			CAFile        string `json:"ca_file"`
+			Interval      int    `json:"interval_minutes"`
+			PageSize      int    `json:"page_size"`
+			MaxPages      int    `json:"max_pages"`
+			MaxRecords    int    `json:"max_records"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			fail(400, "Configuración de conexión inválida.")
+			return true
+		}
+		// The secret, when present, is rotated inside the same transaction as
+		// the rest of the edit.
+		if err := s.UpdateConnectionGroup(r.Context(), principal, connectionID, input.BaseURL, input.AuthMode, input.CredentialRef, input.CAFile, input.Secret, input.Interval, input.PageSize, input.MaxPages, input.MaxRecords, current); err != nil {
+			connectionError(fail, err)
+			return true
+		}
+		send(200, map[string]any{"updated": true, "group_id": connectionID})
 		return true
 	case strings.HasPrefix(path, "connections/") && strings.HasSuffix(path, "/records"):
 		connectionID := strings.TrimSuffix(strings.TrimPrefix(path, "connections/"), "/records")
@@ -644,4 +746,25 @@ func idempotencyKey(r *http.Request) (string, error) {
 		return "", errors.New("invalid idempotency key")
 	}
 	return values[0], nil
+}
+
+func connectionError(fail func(int, string), err error) {
+	switch {
+	case errors.Is(err, ErrDenied):
+		fail(403, "La operación excede tu alcance.")
+	case errors.Is(err, ErrSyncNotFound):
+		fail(404, "Conexión no encontrada.")
+	case errors.Is(err, ErrNoMasterKey):
+		fail(409, "La clave maestra no está cargada; no se pueden guardar secretos.")
+	case errors.Is(err, ErrProbeRequired):
+		fail(409, "Probá la conexión correctamente antes de activar la agenda.")
+	case errors.Is(err, ErrSecretNotFound):
+		fail(409, "La conexión no tiene un secreto cifrado.")
+	case errors.Is(err, ErrForeignSecret):
+		fail(400, "Una conexión sólo puede usar su propio secreto.")
+	case errors.Is(err, ErrSecretReentry):
+		fail(409, "Cambiar el servidor de la conexión exige volver a cargar el secreto.")
+	default:
+		fail(400, "No se pudo aplicar el cambio de conexión.")
+	}
 }

@@ -208,7 +208,7 @@ func (s *Store) RevokePrincipal(ctx context.Context, subject string) error {
 	return tx.Commit()
 }
 func (s *Store) Connections(ctx context.Context, p Principal) ([]Connection, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.kind,coalesce(s.connector,'') FROM lab_connections c JOIN lab_grants g ON g.connection_id=c.id JOIN lab_principals p ON p.id=g.principal_id LEFT JOIN lab_sync_sources s ON s.connection_id=c.id WHERE p.id=? AND p.enabled=1 ORDER BY c.id`, p.ID)
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,c.kind,coalesce(s.connector,'') FROM lab_connections c JOIN lab_grants g ON g.connection_id=c.id JOIN lab_principals p ON p.id=g.principal_id LEFT JOIN lab_sync_sources s ON s.connection_id=c.id WHERE p.id=? AND p.enabled=1 AND (s.connection_id IS NULL OR (s.enabled=1 AND s.retired_at='')) ORDER BY c.id`, p.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -71,6 +71,12 @@ func (s *Store) SetSyncSchedule(ctx context.Context, p Principal, connectionID s
 	if err != nil {
 		return ErrDenied
 	}
+	if interval > 0 && !(source.Connector == syncConnector && normalizedAuthMode(source.AuthMode) == "none") {
+		var ok int
+		if err = tx.QueryRowContext(ctx, "SELECT ok FROM lab_connection_probes WHERE group_id=?", source.GroupID).Scan(&ok); err != nil || ok != 1 {
+			return ErrProbeRequired
+		}
+	}
 	before, _ := json.Marshal(map[string]any{"connection_id": connectionID, "interval_minutes": source.Interval})
 	if _, err = tx.ExecContext(ctx, "UPDATE lab_sync_sources SET interval_minutes=? WHERE connection_id=?", interval, connectionID); err != nil {
 		return err

@@ -7,9 +7,13 @@ func TestRegistrySeparatesImplementedFromPlanned(t *testing.T) {
 	if !found || cyberArk.Status != StatusAvailable || len(cyberArk.Collections) == 0 || len(cyberArk.AuthModes) == 0 {
 		t.Fatal(cyberArk, found)
 	}
+	wazuh, found := Get(Wazuh)
+	if !found || wazuh.Status != StatusAvailable || len(wazuh.Collections) != 2 || len(wazuh.AuthModes) != 1 || wazuh.AuthModes[0] != "basic-exchange" {
+		t.Fatal(wazuh, found)
+	}
 	for _, id := range []string{
 		"netskope", "qradar", "paloalto", "fortigate", "fortimail", "crowdstrike", "tenable",
-		"wazuh", "fleet-osquery", "defectdojo", "crowdsec", "opnsense", "keycloak", "misp", "openbao",
+		"fleet-osquery", "defectdojo", "crowdsec", "opnsense", "keycloak", "misp", "openbao",
 	} {
 		descriptor, found := Get(id)
 		if !found || descriptor.Status != StatusPlanned {

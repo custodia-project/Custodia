@@ -13,7 +13,7 @@ const binary = join(temporary, 'custodia');
 const webBuild = join(temporary, 'web');
 let server, browser, syncServer;
 try {
-  execFileSync('npm', ['--prefix', 'web', 'run', 'build', '--', '--outDir', webBuild], { cwd: root, env: { ...process.env, VITE_DEMO: '0' }, stdio: 'inherit' });
+  execFileSync('npm', ['--prefix', 'web', 'run', 'build', '--', '--outDir', webBuild], { cwd: root, env: { ...process.env, VITE_FULL: '1' }, stdio: 'inherit' });
   execFileSync('go', ['build', '-o', binary, './cmd/custodia'], { cwd: join(root, 'server'), env: { ...process.env, CGO_ENABLED: '0' }, stdio: 'inherit' });
   execFileSync(binary, ['init-lab', '--dir', join(temporary, 'lab')], { stdio: 'pipe' });
   const token = await readFile(join(temporary, 'lab/lab.token'), 'utf8');

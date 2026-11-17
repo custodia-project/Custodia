@@ -25,7 +25,7 @@ func oidcStore(t *testing.T) (*Store, Principal, time.Time) {
 	if err = s.Seed(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", "hash-placeholder", []string{IdentityConnection}, now); err != nil {
+	if err = s.CreateLocalAdministrator(ctx, "ada.admin", "Ada Admin", "hash-placeholder", []string{IdentityConnection}, false, now); err != nil {
 		t.Fatal(err)
 	}
 	admin, err := s.ResolvePrincipal(ctx, LocalIssuer, "ada.admin")

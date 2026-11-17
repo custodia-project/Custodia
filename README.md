@@ -5,8 +5,8 @@
 <h1 align="center">Custodia</h1>
 
 <p align="center">
-  <strong>What your security tools know, together.</strong><br>
-  Custodia joins the records of the security tools you already run with explicit rules, and shows what none of them sees alone. Every conclusion carries its rule, its source and its capture.
+  <strong>The inventory of your security tools, with their metrics.</strong><br>
+  Custodia connects the tools you already run, collects their inventory with provenance and publishes metrics declared by each connector. Every value carries its source, date and whether the run was complete or partial.
 </p>
 
 <p align="center">
@@ -28,34 +28,36 @@
 
 ## The problem
 
-Each console answers its own question. The PAM vault knows who holds
-privileged accounts. The SSE proxy knows which devices report. The identity
-provider knows who exists. Nobody owns the answer *across* them, so it lives
-in spreadsheets that are stale the day they are built, joined by name
-matching nobody can audit.
+Every security tool has its own console and its own way of counting. The PAM
+knows how many Safes and accounts it manages; the SIEM knows how many agents
+report; the rest lives in spreadsheets that age the same day. Comparing tools
+means opening one console at a time and trusting numbers with no date and no
+provenance.
 
-Custodia replaces that spreadsheet with an inventory that remembers where
-every fact came from and refuses to guess.
+Custodia connects those tools, keeps the inventory with its origin and
+publishes metrics declared by each connector. A value without data is
+"unavailable", never zero; a partial run is marked and is not used for
+conclusions that need the total.
 
-## Questions it answers
+## What it answers
 
-| Question | What Custodia says | Verdict |
-|---|---|---|
-| Who has privileged access but no device we can see? | Alice is in a CyberArk Safe with a service account; Netskope sees her user but no device in a complete capture. | **Gap** |
-| Whose devices stopped reporting? | One of Bob's two devices has been silent for 12 days. That is not proof it was retired, so coverage stays partial. | **Partial** |
-| Which identity is this person? | Two active identity records share Eve's email. Custodia joins neither and waits for a person to choose. | **Unknown** |
-| What does each tool actually say? | Every record as the tool delivered it, with its source ID and run, and the proposed link kept apart. | Raw records |
-
-All four are in the demo, with a fictional company (Acme Corp).
+| Question | What Custodia shows |
+|---|---|
+| Which tools are connected and when did they run? | Inventory per connection, collections, last publication and completeness. |
+| How many agents, Safes or accounts are there? | Totals and breakdowns by state, with the data date. |
+| What changed or stopped reporting? | Age, partiality and unavailable values, never an invented zero. |
+| Where does each number come from? | Drill-down to the exact records that compose the metric and its run. |
 
 ## How it works
 
-1. **Collect.** Read-only adapters per tool. Every record keeps its source
-   ID, the run that brought it and how fresh it is.
-2. **Join.** A link needs one exact, unique match. Two candidates means no
-   link and a decision for a human, never a coin toss.
-3. **Conclude.** Versioned rules turn joined records into verdicts with their
-   evidence: covered, partial, gap or unknown.
+1. **Connect.** An administrator loads the tool from the console with URL,
+   encrypted credentials or a reference, CA and collections. A probe validates
+   access before scheduling.
+2. **Collect.** A worker reads only the declared collections, keeps the
+   external ID, run and age, and publishes transactionally.
+3. **Measure.** Each connector declares its metrics in the binary; they are
+   computed on read over the last publication. No data means "unavailable",
+   not zero.
 
 ## Design principles
 
@@ -79,27 +81,30 @@ checks, offboarding, audits.
 
 ## Sources
 
-| Today, in the demo | Next |
+| Implemented | Open-source catalog next |
 |---|---|
-| CyberArk PAM (Safes, accounts, members) · Netskope SSE (users, devices, posture) | BigID, CrowdStrike, Cortex XDR, Tenable, firewalls |
+| CyberArk PAM (Safes, members, accounts, platforms, PSM) · Wazuh (agents, groups) | Fleet, DefectDojo, CrowdSec, OPNsense, Keycloak, MISP, OpenBao; commercial tools need a customer tenant |
 
-Each new source arrives with its own contract and its own rules; the core is
-not tied to these two vendors.
+Each new source arrives with its contract, allowlist and metrics. There is no
+"Identity population" in the MVP: the focus is inventory and metrics per tool.
 
 ## Status and roadmap
 
-Custodia is an honest prototype. The interface is complete; the backend is
-not.
+Custodia is a self-hosted MVP in progress. Local login, OIDC, inventory with
+metrics, Wazuh accepted against 4.14.10, encrypted secrets and the TLS
+installer are implemented and tested in the laboratory. Console updates and
+the production build cut close this batch; acceptance on a real host is still
+pending.
 
-| Stage | What | State |
+| Stage | What | Status |
 |---|---|---|
-| Demo | People crossed across CyberArk and Netskope, verdicts with evidence and each tool's inventory, in English and Spanish. Runs fully in the browser. | Done |
-| Backend | Go and SQLite; the existing rules move over with their regression tests. | In progress |
-| Self-hosted | Real CyberArk and Netskope adapters, sign-in through OIDC, a reproducible install. | Next |
-| More sources | Data, endpoint, vulnerability and firewall tools. | Later |
+| Access | Local login, sessions, CSRF, administration and configurable OIDC. | Done in lab |
+| Inventory | Declared metrics, CyberArk PAM and Wazuh with their own acceptance. | Done |
+| Operations | Installer, TLS, backups, signed update and rollback. | Local gate done |
+| Distribution | Public release, disposable host and third-party notices. | Pending |
 
-A hosted (SaaS) version will only be evaluated after real, recurring use of
-the self-hosted install.
+The demo keeps the DS Hub legacy modules (People, Netskope SSE, SIA/Risk,
+DSPM); the production build excludes them.
 
 ## Try it
 

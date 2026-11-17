@@ -1,4 +1,4 @@
-import { BookOpen, Boxes, History, UserRound, Users } from 'lucide-react';
+import { BookOpen, Boxes, History, ServerCog, UserRound, Users } from 'lucide-react';
 import type { FrontendRegistration, RuntimeRegistration } from '../source-contract.ts';
 import { t } from './i18n/index.ts';
 
@@ -54,6 +54,16 @@ export const registration = {
       command: { tool: 'dshub', platform: 'dshub', aliases: ['actividad', 'auditoria', 'bitacora', 'logs', 'historial'], priority: 15 },
     },
     {
+      id: 'system', path: '/admin/system', domain: 'admin',
+      label: t('Sistema'), detail: t('Versión, salud y actualización'), icon: ServerCog,
+      description: t('Consultá la versión instalada, el estado de salud y la actualización firmada disponible.'),
+      catalog: true, switcher: true, gate: 'manage', alternatePermission: 'installation:manage',
+      order: 13,
+      runtime: 'admin',
+      category: { id: 'administration', order: 2 },
+      command: { tool: 'dshub', platform: 'dshub', aliases: ['sistema', 'version', 'actualizar', 'salud', 'instalacion'], priority: 16 },
+    },
+    {
       id: 'help', path: '/help', domain: 'cross',
       label: t('Ayuda'), detail: t('Guías de uso e interpretación de datos'), icon: BookOpen,
       description: t('Aprendé qué muestra cada vista, cómo recorrerla y cómo interpretar sus indicadores y datos.'),
@@ -76,3 +86,11 @@ export const registration = {
   runtime,
   manualSync: { domain: 'admin', kind: 'batch', scope: 'all', label: t('Actualizar datos'), detail: t('Sincroniza todas las fuentes configuradas') },
 } as const satisfies FrontendRegistration;
+
+/** Production build: the cross domain keeps inventory, help and administration
+ *  but drops Personas and its coverage model. The demo build uses the full
+ *  registration above. */
+export const coreRegistration = {
+  ...registration,
+  workspaces: registration.workspaces.filter((workspace) => workspace.id !== 'person'),
+};

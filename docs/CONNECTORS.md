@@ -109,6 +109,49 @@ Reglas del alta:
 - La respuesta no repite la referencia de credencial: sólo indica si está
   configurada.
 
+### Secretos de conexión y gestión
+
+El alta acepta un secreto escrito en la consola además de las referencias
+`env:`, `file:` y `secret:`. El valor se cifra antes de tocar SQLite con
+XChaCha20-Poly1305; la clave maestra de 32 bytes vive fuera de la base, en
+`master.key` (0600) dentro del directorio de datos o en la ruta que indique el
+instalador. El AAD liga la versión del formato, el `group_id`, el campo y la
+versión del secreto; un secreto movido a otra conexión o reemplazado por una
+versión anterior no descifra. La API, la auditoría y los logs
+nunca devuelven el valor: sólo `secret_configured` y la versión.
+
+- `POST /api/ingestion/connections` acepta `secret` (write-only) para
+  `bearer`; si se usa, la fuente guarda la referencia interna
+  `vault:<group_id>:auth` y el alta rechaza un valor literal en
+  `credential_ref`. Las referencias externas siguen funcionando. El cliente
+  nunca elige una referencia `vault:`: el alta rechaza cualquiera (en
+  `credential_ref`, `client_id_ref` o `client_secret_ref`), la edición sólo
+  admite la de la misma conexión y el resolver del probe y del worker se
+  niega a descifrar el secreto de otra conexión aunque la referencia llegue
+  a la base. Un secreto sólo lo envía su propia conexión.
+- `PUT /api/ingestion/connections/{group_id}` edita URL, auth, CA, límites y
+  agenda, y acepta `secret` para rotarlo en la misma transacción: si la
+  edición se rechaza, el secreto no cambia. Cambiar URL o autenticación
+  invalida el probe anterior y apaga la agenda. Cambiar el origen (esquema,
+  host o puerto) de una conexión con secreto cifrado exige enviar el secreto
+  otra vez (409); un cambio de path en el mismo origen lo conserva.
+- `POST /api/ingestion/connections/{group_id}/secret` rota el secreto, sube la
+  versión e invalida probe y agenda.
+- `POST /api/ingestion/connections/{group_id}/pause|resume|retire` pausa,
+  reanuda o retira. Retirar conserva historial y auditoría, apaga la agenda y
+  oculta la conexión de las vistas y del worker; no borra observaciones.
+- `GET /api/ingestion/connections` lista los grupos visibles para el
+  administrador con `secret_configured`, estado, última prueba y agenda. Nunca
+  incluye el secreto ni la referencia interna.
+- La agenda sólo se activa después de un probe correcto de la configuración
+  vigente. Cualquier cambio de URL, auth, CA o secreto la apaga y exige un
+  probe nuevo.
+- `init` genera `master.key`; `serve --master-key RUTA` la carga (por defecto
+  `<dir>/master.key`). El backup de SQLite no incluye la clave: restaurar en
+  otro host exige conservarla por separado. Sin clave, las conexiones con
+  secreto cifrado no pueden probarse ni sincronizarse; el resto del producto
+  sigue operativo.
+
 `POST /api/ingestion/connections/{id}/probe` acepta el `group_id` o una fila
 de colección. Con el grupo ejecuta el mismo plan validado sobre la unión de
 endpoints de todas sus colecciones, exige que compartan URL/auth/CA y devuelve
@@ -141,7 +184,7 @@ etiqueta de catálogo; no acredita soporte ni contrato.
 | FortiGate | Network security | Comercial | Planificado | Appliance de un cliente. |
 | Palo Alto Networks | Network security | Comercial | Planificado | Firewall/Panorama de un cliente. |
 | Tenable | Vulnerability management | Comercial | Planificado | Tenant de un cliente. |
-| Wazuh | SIEM/XDR | Código abierto | Candidato prioritario | Instancia propia. |
+| Wazuh | SIEM/XDR | Código abierto | Implementado y aceptado contra 4.14.10 | Instancia propia con agente real. |
 | Fleet (osquery) | Endpoint inventory | Código abierto | Candidato prioritario | Instancia propia. |
 | DefectDojo | Vulnerability management | Código abierto | Candidato prioritario | Instancia propia. |
 | CrowdSec | Intrusion prevention | Código abierto | Candidato | API local de una instancia propia. |
@@ -263,6 +306,52 @@ Las rutas no aceptan escrituras (405) y no agregan tablas: el cálculo usa las
 observaciones y corridas ya publicadas. El detalle nunca devuelve secretos,
 payloads ni campos fuera de la allowlist.
 
+
+## Tercer adaptador: Wazuh (agentes y grupos)
+
+Contrato verificado contra la documentación oficial y el OpenAPI de Wazuh
+4.x: [API](https://documentation.wazuh.com/current/user-manual/api/getting-started.html),
+[referencia](https://documentation.wazuh.com/current/user-manual/api/reference.html),
+[release 4.14.10](https://documentation.wazuh.com/current/release-notes/release-4-14-10.html)
+y [spec.yaml](https://github.com/wazuh/wazuh/blob/master/api/api/spec/spec.yaml).
+La instancia de aceptación es un `wazuh/wazuh-manager:4.14.10` propio con
+`wazuh/wazuh-agent:4.14.10`; no es un tenant de cliente.
+
+- Base HTTPS del manager (`:55000`), CA privada admitida por archivo.
+- Login `POST /security/user/authenticate` con Basic auth; devuelve un JWT
+  de 900 segundos. Custodia lo obtiene al preparar el probe o la corrida y lo
+  mantiene sólo en memoria. No hay refresh ni token persistido: una corrida
+  que exceda la vigencia falla cerrada y se reintenta.
+- RBAC mínimo verificado: acciones `agent:read`, `group:read` y
+  `manager:read`. La aceptación usó un usuario con una política propia de
+  sólo lectura; `POST /agents` responde 403.
+- Colecciones: `GET /agents` y `GET /groups`, con `limit`/`offset`/`sort`,
+  `total_affected_items` y páginas de hasta 500. `GET /manager/info` sólo se
+  usa en el probe.
+- Allowlist de `agents`: id externo, nombre, `status` (`active`, `pending`,
+  `never_connected`, `disconnected`), IP, IP de registro, SO (nombre,
+  plataforma, versión, arquitectura), versión del agente, grupos (lista
+  unida por coma), cantidad de grupos, último keepalive, alta, manager y
+  nodo. Nada de configuración, claves ni payloads.
+- Allowlist de `groups`: nombre y cantidad de agentes.
+- **Las alertas no están en esta API**: viven en el indexer. Este adaptador no
+  lee el indexer ni inventa métricas de detecciones.
+
+Métricas declaradas: agentes totales, activos, pendientes, desconectados,
+nunca conectados, sin contacto hace más de 7 días (`age_over` sobre
+`last_keep_alive`), grupos totales y grupos sin agentes (`agent_count = 0`).
+Un agente sin keepalive no cuenta como antiguo.
+
+Aceptación ejecutada el 16/11 contra la instancia propia: 4 agentes (1 activo,
+1 desconectado, 2 nunca conectados) y 3 grupos (2 vacíos); probe con 0
+endpoints fallidos; publicaciones completas de 4 y 3 registros; métricas
+4/1/0/1/2/0/3/2. El recorrido de alta, secreto cifrado, CA, probe, agenda e
+inventario se repitió desde la consola.
+
+Límites: un solo manager (los nodos de cluster quedan para después), sin
+alertas/indexer, sin escrituras ni acciones sobre agentes, y el JWT se renueva
+por corrida. Un manager real con otra versión mayor requiere revisar el
+contrato antes de declararlo disponible.
 
 ## Estados y reconciliación
 
