@@ -24,8 +24,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"custodia/server/internal/sqlitebackup"
 )
 
 type Options struct {
@@ -42,8 +40,12 @@ type Options struct {
 	CurrentVersion string
 	HealthURL      string
 	HealthCA       string
-	Service        string
-	NoSystemd      bool
+	// HealthServerName is the TLS name checked on the health certificate. The
+	// updater connects to loopback, while the certificate names the public
+	// host, so the name must be given explicitly.
+	HealthServerName string
+	Service          string
+	NoSystemd        bool
 }
 
 // Apply verifies, backs up, swaps, migrates and health-checks one release.
@@ -81,12 +83,23 @@ func Apply(ctx context.Context, options Options) error {
 	if !newerVersion(options.Version, options.CurrentVersion) {
 		return fmt.Errorf("release %s is not newer than the installed %s", options.Version, options.CurrentVersion)
 	}
+	// The data directory belongs to the service user. Root never opens a
+	// path inside it: backup, migration and rollback of the database run as
+	// the directory owner, so a link planted there cannot redirect a
+	// privileged write.
+	owner, err := dataOwner(options.DataDir)
+	if err != nil {
+		return err
+	}
+	database := filepath.Join(options.DataDir, "state.db")
 	backup := filepath.Join(options.DataDir, "state.db.update-backup")
 	previousBinary := options.Binary + ".previous"
 	previousWeb := options.WebDir + ".previous"
 	_ = os.RemoveAll(previousWeb)
-	_ = os.Remove(backup)
-	if err = sqlitebackup.Backup(ctx, filepath.Join(options.DataDir, "state.db"), backup); err != nil {
+	if err = runAs(ctx, owner, "rm", "-f", "--", backup); err != nil {
+		return fmt.Errorf("database backup: %w", err)
+	}
+	if err = runAs(ctx, owner, options.Binary, "backup", "--dir", options.DataDir, "--out", backup); err != nil {
 		return fmt.Errorf("database backup: %w", err)
 	}
 	if err = copyFile(options.Binary, previousBinary); err != nil {
@@ -109,7 +122,9 @@ func Apply(ctx context.Context, options Options) error {
 		if err := os.Rename(previousWeb, options.WebDir); err != nil {
 			failures = append(failures, err.Error())
 		}
-		if err := copyFile(backup, filepath.Join(options.DataDir, "state.db")); err != nil {
+		if err := runAs(ctx, owner, "rm", "-f", "--", database+"-wal", database+"-shm"); err != nil {
+			failures = append(failures, err.Error())
+		} else if err := runAs(ctx, owner, "cp", "--remove-destination", "--", backup, database); err != nil {
 			failures = append(failures, err.Error())
 		}
 		if len(failures) > 0 {
@@ -145,7 +160,7 @@ func Apply(ctx context.Context, options Options) error {
 	if err = os.Rename(filepath.Join(packageDir, "web"), options.WebDir); err != nil {
 		return fail(err)
 	}
-	if err = runMigrations(ctx, options.Binary, options.DataDir); err != nil {
+	if err = runAs(ctx, owner, options.Binary, "migrate", "--dir", options.DataDir); err != nil {
 		return fail(fmt.Errorf("migration: %w", err))
 	}
 	if options.Service != "" && !options.NoSystemd {
@@ -154,12 +169,48 @@ func Apply(ctx context.Context, options Options) error {
 		}
 	}
 	if options.HealthURL != "" {
-		if err = waitHealth(ctx, options.HealthURL, options.HealthCA); err != nil {
+		if err = waitHealth(ctx, options.HealthURL, options.HealthCA, options.HealthServerName); err != nil {
 			return fail(err)
 		}
 	}
-	_ = os.Remove(backup)
+	_ = runAs(ctx, owner, "rm", "-f", "--", backup)
 	_ = os.Remove(previousBinary)
+	return nil
+}
+
+// dataOwner returns the credential that data directory operations must use.
+// The directory itself must be a real directory, not a link. When the
+// updater runs as root and the directory belongs to another user, every
+// operation inside it drops to that user; otherwise it runs unchanged.
+func dataOwner(dataDir string) (*syscall.Credential, error) {
+	info, err := os.Lstat(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("data directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, errors.New("data directory must be a directory, not a link")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil, errors.New("data directory ownership is unknown")
+	}
+	if os.Geteuid() != 0 || stat.Uid == 0 {
+		return nil, nil
+	}
+	return &syscall.Credential{Uid: stat.Uid, Gid: stat.Gid, Groups: []uint32{stat.Gid}}, nil
+}
+
+// runAs runs a command, as owner when it is set, and reports its output on
+// failure.
+func runAs(ctx context.Context, owner *syscall.Credential, name string, args ...string) error {
+	command := exec.CommandContext(ctx, name, args...)
+	if owner != nil {
+		command.SysProcAttr = &syscall.SysProcAttr{Credential: owner}
+	}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
 	return nil
 }
 
@@ -426,13 +477,6 @@ func copyFile(source, destination string) error {
 	return err
 }
 
-func runMigrations(ctx context.Context, binary, dataDir string) error {
-	command := exec.CommandContext(ctx, binary, "migrate", "--dir", dataDir)
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	return command.Run()
-}
-
 func systemctl(ctx context.Context, action, service string) error {
 	command := exec.CommandContext(ctx, "systemctl", action, service)
 	command.Stdout = io.Discard
@@ -440,7 +484,7 @@ func systemctl(ctx context.Context, action, service string) error {
 	return command.Run()
 }
 
-func waitHealth(ctx context.Context, target, caFile string) error {
+func waitHealth(ctx context.Context, target, caFile, serverName string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	if caFile != "" {
 		pem, err := os.ReadFile(caFile)
@@ -451,7 +495,7 @@ func waitHealth(ctx context.Context, target, caFile string) error {
 		if !pool.AppendCertsFromPEM(pem) {
 			return errors.New("invalid health CA")
 		}
-		client.Transport = &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}
+		client.Transport = &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, ServerName: serverName}}
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
@@ -489,6 +533,12 @@ func ApplyRequest(ctx context.Context, requestPath string, options Options) erro
 	if err != nil {
 		return err
 	}
+	// Consume the request before acting on it. The path unit fires while the
+	// file exists, so a request left behind after a failure would re-run the
+	// update and its rollback forever. Unlinking does not follow links.
+	if err := os.Remove(requestPath); err != nil {
+		return fmt.Errorf("consume update request: %w", err)
+	}
 	var request struct {
 		Manifest json.RawMessage `json:"manifest"`
 	}
@@ -511,16 +561,32 @@ func ApplyRequest(ctx context.Context, requestPath string, options Options) erro
 	defer os.RemoveAll(directory)
 	materialize := func(location, name string) (string, error) {
 		if !strings.HasPrefix(location, "https://") {
-			// A local path chosen by the service user must be a regular file,
-			// so it cannot point the root helper at a device or a link.
-			info, err := os.Lstat(location)
+			// A local path chosen by the service user is opened once without
+			// following links, checked to be a regular file on that same
+			// descriptor and copied into the private directory; every later
+			// step uses only the copy.
+			source, err := os.OpenFile(location, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+			if err != nil {
+				return "", fmt.Errorf("update request file: %w", err)
+			}
+			defer source.Close()
+			info, err := source.Stat()
 			if err != nil {
 				return "", err
 			}
 			if !info.Mode().IsRegular() {
 				return "", errors.New("update request names a non-regular local file")
 			}
-			return location, nil
+			target := filepath.Join(directory, name)
+			output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+			if err != nil {
+				return "", err
+			}
+			defer output.Close()
+			if _, err = io.Copy(output, io.LimitReader(source, 1<<30)); err != nil {
+				return "", err
+			}
+			return target, nil
 		}
 		target := filepath.Join(directory, name)
 		if err := download(ctx, location, target); err != nil {
@@ -536,10 +602,7 @@ func ApplyRequest(ctx context.Context, requestPath string, options Options) erro
 	if options.Signature, err = materialize(manifest.Signature, "manifest.json.sig"); err != nil {
 		return err
 	}
-	if err := Apply(ctx, options); err != nil {
-		return err
-	}
-	return os.Remove(requestPath)
+	return Apply(ctx, options)
 }
 
 func download(ctx context.Context, location, target string) error {

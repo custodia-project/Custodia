@@ -150,6 +150,7 @@ func run() error {
 	updateService := f.String("service", "custodia.service", "systemd service to restart")
 	updateHealth := f.String("health-url", "", "health URL checked after the update")
 	updateHealthCA := f.String("health-ca", "", "CA for the health URL")
+	updateHealthName := f.String("health-server-name", "", "TLS name expected on the health certificate (the public host)")
 	updateNoSystemd := f.Bool("no-systemd", false, "test mode: do not call systemctl")
 	updateManifest := f.String("update-manifest", "", "release manifest path or HTTPS URL shown in the console")
 	updateRequest := f.String("request", "", "console update request to apply")
@@ -512,7 +513,7 @@ func run() error {
 		if *updateRequest != "" {
 			if err := updater.ApplyRequest(ctx, *updateRequest, updater.Options{
 				DataDir: *dir, Binary: *updateBinary, WebDir: *webDir, HealthURL: *updateHealth,
-				HealthCA: *updateHealthCA, Service: *updateService, NoSystemd: *updateNoSystemd,
+				HealthCA: *updateHealthCA, HealthServerName: *updateHealthName, Service: *updateService, NoSystemd: *updateNoSystemd,
 				AllowedSigners: *updateSigners, CurrentVersion: version,
 			}); err != nil {
 				return err
@@ -523,7 +524,7 @@ func run() error {
 		if err := updater.Apply(ctx, updater.Options{
 			DataDir: *dir, Binary: *updateBinary, WebDir: *webDir, Package: *updatePackage,
 			SHA256: *updateSHA, Signature: *updateSignature, AllowedSigners: *updateSigners,
-			Version: *updateVersion, CurrentVersion: version, HealthURL: *updateHealth, HealthCA: *updateHealthCA,
+			Version: *updateVersion, CurrentVersion: version, HealthURL: *updateHealth, HealthCA: *updateHealthCA, HealthServerName: *updateHealthName,
 			Service: *updateService, NoSystemd: *updateNoSystemd,
 		}); err != nil {
 			return err

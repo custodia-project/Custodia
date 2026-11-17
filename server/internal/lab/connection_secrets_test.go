@@ -300,3 +300,28 @@ func TestConnectionSecretOriginChangeAndAtomicRotation(t *testing.T) {
 		t.Fatal("ciphertext decrypted under another version")
 	}
 }
+
+// Whitespace around a vault: reference must not let it skip the origin check.
+func TestConnectionSecretReferenceIsCanonicalized(t *testing.T) {
+	ctx := context.Background()
+	s, admin, now := secretStore(t)
+	registration := registerSecretConnection(t, s, admin, now, "original secret")
+	group := registration.GroupID
+	padded := "  vault:" + group + ":auth \t"
+	if err := s.UpdateConnectionGroup(ctx, admin, group, "https://other.globex.example", "", padded, "", "", 0, 0, 0, 0, now); !errors.Is(err, ErrSecretReentry) {
+		t.Fatal("padded vault reference skipped the origin check", err)
+	}
+	if err := s.UpdateConnectionGroup(ctx, admin, group, "", "", " vault:other-group:auth", "", "", 0, 0, 0, 0, now); !errors.Is(err, ErrForeignSecret) {
+		t.Fatal("padded foreign vault reference accepted", err)
+	}
+	if err := s.UpdateConnectionGroup(ctx, admin, group, "", "", padded, "", "", 0, 0, 0, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := s.DB.QueryRow("SELECT credential_ref FROM lab_sync_sources WHERE group_id=?", group).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "vault:"+group+":auth" {
+		t.Fatalf("stored reference was not canonical: %q", stored)
+	}
+}

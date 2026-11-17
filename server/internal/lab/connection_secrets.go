@@ -373,6 +373,10 @@ func (s *Store) UpdateConnectionGroup(ctx context.Context, actor Principal, grou
 	if currentBase == "" {
 		return ErrSyncNotFound
 	}
+	// Canonicalize once: every check below and the stored value use the same
+	// string, so whitespace cannot make a reference pass one check and skip
+	// another.
+	credentialRef = strings.TrimSpace(credentialRef)
 	if secret != "" && credentialRef != "" {
 		return errors.New("send either a secret or a credential reference, not both")
 	}
@@ -404,7 +408,7 @@ func (s *Store) UpdateConnectionGroup(ctx context.Context, actor Principal, grou
 			return err
 		}
 		credentialRef = vaultReference(groupID)
-	} else if credentialRef == vaultReference(groupID) && !sameOrigin(currentBase, baseURL) {
+	} else if strings.HasPrefix(strings.TrimSpace(credentialRef), "vault:") && !sameOrigin(currentBase, baseURL) {
 		// The stored secret was entered for the current host. Sending it to a
 		// new origin needs the operator to provide it again.
 		return ErrSecretReentry

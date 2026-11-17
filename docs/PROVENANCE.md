@@ -48,6 +48,27 @@ distribuir esta nueva base falta revisar su árbol, retirar lo ajeno al alcance,
 resolver procedencia y generar sus propios avisos. No hay paquete ni publicación
 de Faro Digital.
 
+## Paquete autohospedado: avisos y marcas (17/11)
+
+El paquete de Custodia (`npm run package:go`) incluye `THIRD-PARTY-NOTICES.md`,
+generado por `scripts/third-party-notices.mjs` y listado en el manifiesto
+firmado. Cubre lo que el paquete distribuye: la librería estándar de Go, los
+módulos Go enlazados en el binario y el árbol npm de producción de la web
+(38 componentes al 17/11: BSD-3-Clause 11, Apache-2.0 11, MIT 10, OFL-1.1 3,
+0BSD 2, ISC 1). Copia literalmente cada LICENSE, NOTICE y PATENTS, incluida la
+nota de dominio público de SQLite que trae `modernc.org/sqlite`. El generador
+falla si aparece una licencia fuera de la lista permisiva, un módulo Go sin
+licencia revisada o un componente sin texto; `npm run verify:notices` lo
+comprueba. `client-only` no trae archivo propio y se le aplica, con nota, la
+licencia MIT de React, que lo publica.
+
+Marcas: el build de producción no copia los logos de Netskope ni de BigID
+(fuera del MVP; `verify:build:core` lo verifica); conserva el de CyberArk,
+que identifica el conector PAM. El aviso declara que los nombres de producto
+son marcas de sus dueños, usadas sólo para identificar las herramientas que
+Custodia lee, sin afiliación. La demo conserva todos los logos que muestra. No
+es una revisión legal; la decisión de publicar marcas sigue siendo del dueño.
+
 ## Experimento anterior
 
 Registro inicial de `PROD-DIST-001`: qué código y qué assets forman el build

@@ -17,6 +17,7 @@ PACKAGE=
 PACKAGE_SHA256=
 SIGNATURE=
 ALLOWED_SIGNERS=
+UPDATE_MANIFEST=
 NO_SYSTEMD=0
 UNINSTALL=0
 PURGE=0
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     --sha256) PACKAGE_SHA256=$2; shift 2 ;;
     --signature) SIGNATURE=$2; shift 2 ;;
     --allowed-signers) ALLOWED_SIGNERS=$2; shift 2 ;;
+    --update-manifest) UPDATE_MANIFEST=$2; shift 2 ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
@@ -57,12 +59,17 @@ done
 
 if [ "$UNINSTALL" = 1 ]; then
   if [ "$NO_SYSTEMD" = 0 ] && command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now custodia.service >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/custodia.service
+    # Every unit the installer created: the service, the update watcher and
+    # the backup timer would otherwise keep firing against a missing binary.
+    # One unit at a time: systemctl fails the whole call if one is missing.
+    for unit in custodia-update.path custodia-backup.timer custodia.service custodia-update.service custodia-backup.service; do
+      systemctl disable --now "$unit" >/dev/null 2>&1 || systemctl stop "$unit" >/dev/null 2>&1 || true
+    done
+    rm -f /etc/systemd/system/custodia.service /etc/systemd/system/custodia-update.service /etc/systemd/system/custodia-update.path /etc/systemd/system/custodia-backup.service /etc/systemd/system/custodia-backup.timer
     systemctl daemon-reload >/dev/null 2>&1 || true
   fi
-  rm -f "$PREFIX/bin/custodia"
-  rm -rf "$PREFIX/lib/custodia/web"
+  rm -f "$PREFIX/bin/custodia" "$PREFIX/bin/custodia.previous"
+  rm -rf "$PREFIX/lib/custodia"
   if [ "$PURGE" = 1 ]; then rm -rf "$DATA_DIR" "$CONFIG_DIR"; say "Custodia removed, including data and configuration."; else say "Custodia removed. Data in $DATA_DIR and configuration in $CONFIG_DIR were preserved."; fi
   exit 0
 fi
@@ -192,7 +199,7 @@ Wants=network-online.target
 Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_USER
-ExecStart=$PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key
+ExecStart=$PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key${UPDATE_MANIFEST:+ --update-manifest $UPDATE_MANIFEST}
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -207,8 +214,10 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 WantedBy=multi-user.target
 UNIT
   install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR/.update" 2>/dev/null || true
-  health_port=$(printf '%s' "$PUBLIC_ORIGIN" | sed -nE 's#^https?://[^:/]+:([0-9]+).*#\1#p')
-  [ -n "$health_port" ] || health_port=443
+  # The updater checks health on the local listener and verifies the
+  # certificate against the public host it was issued for.
+  health_port=${LISTEN##*:}
+  health_host=$(printf '%s' "$PUBLIC_ORIGIN" | sed -E 's#^https?://##; s#[:/].*##')
   cat > /etc/systemd/system/custodia-update.service <<UNIT
 [Unit]
 Description=Custodia signed update
@@ -216,7 +225,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$PREFIX/bin/custodia update --request $DATA_DIR/.update/request.json --allowed-signers $PREFIX/lib/custodia/allowed_signers --dir $DATA_DIR --binary $PREFIX/bin/custodia --web-dir $PREFIX/lib/custodia/web --service custodia.service --health-url https://127.0.0.1:$health_port/api/health --health-ca $CONFIG_DIR/tls/server.crt
+ExecStart=$PREFIX/bin/custodia update --request $DATA_DIR/.update/request.json --allowed-signers $PREFIX/lib/custodia/allowed_signers --dir $DATA_DIR --binary $PREFIX/bin/custodia --web-dir $PREFIX/lib/custodia/web --service custodia.service --health-url https://127.0.0.1:$health_port/api/health --health-ca $CONFIG_DIR/tls/server.crt --health-server-name $health_host
 UNIT
   cat > /etc/systemd/system/custodia-update.path <<UNIT
 [Unit]
@@ -238,7 +247,7 @@ Description=Custodia daily SQLite backup
 Type=oneshot
 User=$SERVICE_USER
 Group=$SERVICE_USER
-ExecStart=/bin/sh -c 'exec $PREFIX/bin/custodia backup --dir $DATA_DIR --out $DATA_DIR/backups/custodia-$(date -u +%%Y%%m%%d-%%H%%M%%S).db'
+ExecStart=/bin/sh -c 'exec $PREFIX/bin/custodia backup --dir $DATA_DIR --out $DATA_DIR/backups/custodia-\$\$(date -u +%%Y%%m%%d-%%H%%M%%S).db'
 UNIT
   cat > /etc/systemd/system/custodia-backup.timer <<UNIT
 [Unit]
@@ -278,4 +287,7 @@ if [ "$first_admin" = 1 ]; then
   say "  one-time password: $password"
   say "  Change it at the first sign-in. It is not logged; this is the only print."
 fi
-[ "$NO_SYSTEMD" = 1 ] && say "Run: $PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key"
+if [ "$NO_SYSTEMD" = 1 ]; then
+  say "Run: $PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key"
+fi
+exit 0

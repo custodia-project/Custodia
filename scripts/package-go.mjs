@@ -51,6 +51,9 @@ try {
   await cp(join(root, 'server', 'README.md'), join(packageDir, 'server', 'README.md'));
   await cp(join(root, 'docs'), join(packageDir, 'docs'), { recursive: true });
   await writeFile(join(packageDir, 'VERSION'), `${version}\n${platform}/${architecture}\n`, { flag: 'wx' });
+  // Third-party notices for the linked Go modules and the web dependencies;
+  // the generator fails on a license outside the allowlist.
+  execFileSync('node', [join(root, 'scripts', 'third-party-notices.mjs'), '--out', join(packageDir, 'THIRD-PARTY-NOTICES.md')], { cwd: root, stdio: 'inherit' });
 
   const files = [];
   for (const file of await filesIn(packageDir)) {

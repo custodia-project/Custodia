@@ -6,6 +6,53 @@ revisado: 2026-11-16
 
 # Entregas y evidencia
 
+## Avisos de terceros del paquete — 17/11
+
+`PROD-DIST-001` (parcial): `scripts/third-party-notices.mjs` genera
+`THIRD-PARTY-NOTICES.md` dentro del paquete, listado en el manifiesto firmado,
+con la tabla de componentes y el texto literal de cada licencia para la
+librería estándar de Go, los módulos Go enlazados y el árbol npm de producción
+de la web: 38 componentes, todos BSD-3-Clause, Apache-2.0, MIT, OFL-1.1, 0BSD
+o ISC. Falla ante una licencia fuera de la lista permisiva, un módulo Go sin
+licencia revisada o un componente sin texto. El build de producción deja de
+copiar los logos de Netskope y BigID. **Prueba:** `npm run verify:notices`,
+`npm run verify:build:core`, un paquete generado que contiene el aviso en su
+manifiesto, y `verify:go:install`/`verify:go:update` con el empaquetado nuevo.
+Pendiente del dueño: decidir publicación de marcas y de la release.
+
+## Aceptación con systemd real en LXD — 17/11
+
+`PROD-INSTALL-001`, `PROD-UPDATE-001` y `PROD-CONSOLE-001`: aceptados con
+systemd real en un contenedor de sistema LXD Ubuntu 24.04 descartable, con
+releases 0.1.0 y 0.2.0 firmadas con una clave de prueba. `npm run
+accept:systemd` (`scripts/accept-systemd-lxd.sh`) repite el recorrido y borra
+el contenedor: instalación como root, reinstalación idempotente (sin nuevo
+administrador ni nueva clave maestra), contraseña de un solo uso con cambio
+obligatorio, conexión con secreto cifrado (sin texto claro en la base),
+backup desde la consola, actualización pedida desde la consola y aplicada por
+`custodia-update.path`, un enlace plantado por `custodia` hacia un archivo de
+root que el actualizador no sigue, una actualización firmada con la clave del
+usuario del servicio rechazada por su firma, el timer de backup y la
+desinstalación (conserva datos) y purga. También se comprobó a mano la vuelta
+atrás real: con la salud fallando, el actualizador restauró 0.1.0 y el servicio
+siguió sano.
+
+**Bugs encontrados sólo con systemd y corregidos:** la salud se consultaba en
+`127.0.0.1` con un certificado emitido para el host público y nunca pasaba
+(ahora `--health-server-name` y el puerto de `--listen`); una solicitud fallida
+quedaba en disco y `custodia-update.path` repetía actualización y rollback en
+bucle (ahora se consume antes de aplicar); el instalador terminaba con código 1
+tras una instalación correcta; el nombre del backup diario se rompía por los
+especificadores `%` de systemd; la desinstalación dejaba activos el watcher de
+actualización y el timer de backup; y el servicio instalado no recibía el
+manifiesto de actualización (`--update-manifest`). El actualizador root ahora
+hace backup, migración y rollback de la base como dueño del directorio de
+datos, y copia una sola vez, sin seguir enlaces, los archivos locales que nombra
+la solicitud.
+
+Límites: contenedor LXD, no una VM ni un host físico; certificado autofirmado;
+sin release pública ni clave de release real.
+
 ## Actualización firmada con backup y rollback — 17/11
 
 `PROD-UPDATE-001`: `custodia update` verifica el SHA-256 del archivo y la firma

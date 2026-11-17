@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
+import { readdirSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 /* La app de Custodia. En desarrollo, /api va al backend local; con
    VITE_DEMO=1 la API simulada responde dentro del navegador (demo estática). */
@@ -22,12 +24,26 @@ const excludedModules = [
   /\/posture-workspace$/,
 ];
 
+// Vendor marks of tools outside the MVP. Vite copies public/ whole, so the
+// production build removes them; the demo keeps every mark it shows.
+const excludedPublicAssets = /^(netskope|bigid)[-_.]/i;
+
 /* The production profile excludes the DS Hub legacy tools from the graph.
    The demo keeps the full registry and the real lazy modules. */
 function productionProfile() {
+  let outDir = '';
   return {
     name: 'custodia-production-profile',
     enforce: 'pre' as const,
+    configResolved(config: { root: string; build: { outDir: string } }) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    closeBundle() {
+      if (process.env.VITE_DEMO === '1' || process.env.VITE_FULL === '1' || !outDir) return;
+      for (const name of readdirSync(outDir)) {
+        if (excludedPublicAssets.test(name)) rmSync(join(outDir, name), { force: true });
+      }
+    },
     resolveId(source: string) {
       if (process.env.VITE_DEMO === '1' || process.env.VITE_FULL === '1') return null;
       if (source.endsWith('/sources.ts') || source.endsWith('/sources')) return productionSources;

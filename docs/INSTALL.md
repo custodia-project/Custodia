@@ -86,13 +86,23 @@ El modo `ozal` sigue detrás del gateway y no se cambia su contraseña de
 aserción. `GET /api/health` es público, sin datos, y devuelve versión y modo
 para que el instalador y el actualizador comprueben salud.
 
+## Actualización desde la consola
+
+`--update-manifest RUTA|URL` hace que el servicio instalado lea el manifiesto
+de la release disponible y la consola ofrezca la actualización. La solicitud
+la aplica `custodia-update.service` (root), que la consume antes de actuar:
+una actualización fallida no se repite sola. Comprueba la salud en el
+listener local (`--listen`) y valida el certificado contra el host de
+`--public-origin` (`--health-server-name`). Backup, migración y rollback de la
+base corren como el usuario dueño de `/var/lib/custodia`, nunca como root.
+
 ## Idempotencia y desinstalación
 
 Volver a ejecutar el instalador reemplaza binario y web, conserva la base, la
-clave y el administrador existente. `--uninstall` detiene y retira el servicio
-y el binario; conserva datos y configuración. `--purge` elimina también
-`/var/lib/custodia` y `/etc/custodia`. La instalación real con systemd, TLS
-provisto y un host descartable sigue pendiente de aceptación; el gate
+clave y el administrador existente. `--uninstall` detiene y retira el servicio,
+el watcher de actualización, el timer de backup y el binario; conserva datos y configuración. `--purge` elimina también
+`/var/lib/custodia` y `/etc/custodia`. `npm run accept:systemd` acepta instalación, actualización, consola,
+desinstalación y purga con systemd real en un contenedor LXD descartable; el gate
 `npm run verify:go:install` prueba el paquete firmado, la instalación local sin
 systemd, TLS, salud, contraseña temporal, rechazo de firma inválida y
 desinstalación.
