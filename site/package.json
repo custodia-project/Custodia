@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "npm run site && vite",
-    "build": "npm run site && vite build",
+    "build": "npm run site && vite build && node scripts/build-sitemap.mjs",
+    "check": "node scripts/check-site.mjs",
     "preview": "vite preview",
     "site": "node scripts/build-site.mjs"
   },

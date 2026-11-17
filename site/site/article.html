@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta name="theme-color" content="#06070a" />
+    <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large" />
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <link rel="canonical" href="https://custodia.octaviosantacruz.com{{path}}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Custodia" />
+    <meta property="og:locale" content="{{ogLocale}}" />
+    <meta property="og:url" content="https://custodia.octaviosantacruz.com{{path}}" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:image" content="https://custodia.octaviosantacruz.com/shots/{{lang}}/summary.png?v={{shotVersion}}" />
+    <meta property="og:image:width" content="1440" />
+    <meta property="og:image:height" content="900" />
+    <meta property="og:image:alt" content="{{ogImageAlt}}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">{{jsonLd}}</script>
+    <link rel="alternate" hreflang="en" href="https://custodia.octaviosantacruz.com{{enPath}}" />
+    <link rel="alternate" hreflang="es" href="https://custodia.octaviosantacruz.com{{esPath}}" />
+    <link rel="alternate" hreflang="x-default" href="https://custodia.octaviosantacruz.com{{enPath}}" />
+    <link rel="stylesheet" href="/src/site/site.css" />
+    <script type="module" src="/src/site/site.ts"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">{{skip}}</a>
+    <div class="site">
+{{header}}
+      <main id="content" class="article" data-copy="{{copy}}" data-copied="{{copied}}">
+        <header class="article-hero">
+          <nav class="breadcrumbs" aria-label="{{breadcrumbLabel}}">
+            <ol>{{breadcrumbs}}</ol>
+          </nav>
+          <p class="eyebrow">{{eyebrow}}</p>
+          <h1>{{h1}}</h1>
+          <p class="article-lede">{{lede}}</p>
+          <ul class="article-status" aria-label="{{statusLabel}}">{{status}}</ul>
+          <p class="article-meta">{{reviewedLabel}} <time datetime="{{reviewed}}">{{reviewed}}</time></p>
+        </header>
+        <div class="article-body">
+          {{body}}
+          <section class="article-docs" aria-labelledby="docs-title">
+            <h2 id="docs-title">{{docsTitle}}</h2>
+            <p class="docs-note">{{docsNote}}</p>
+            <ul>{{docs}}</ul>
+          </section>
+          <nav class="article-related" aria-labelledby="related-title">
+            <h2 id="related-title">{{relatedTitle}}</h2>
+            <ul>{{related}}</ul>
+          </nav>
+        </div>
+      </main>
+{{footer}}
+    </div>
+  </body>
+</html>

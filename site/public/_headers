@@ -8,10 +8,37 @@
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
 
-# El HTML se revalida en cada visita, así un deploy se ve enseguida.
+# El HTML y los archivos de descubrimiento se revalidan en cada visita, así
+# un deploy se ve enseguida.
 /
   Cache-Control: public, max-age=0, must-revalidate
 /es/
+  Cache-Control: public, max-age=0, must-revalidate
+/inventory/
+  Cache-Control: public, max-age=0, must-revalidate
+/connectors/
+  Cache-Control: public, max-age=0, must-revalidate
+/connectors/*
+  Cache-Control: public, max-age=0, must-revalidate
+/install/
+  Cache-Control: public, max-age=0, must-revalidate
+/limits/
+  Cache-Control: public, max-age=0, must-revalidate
+/es/inventario/
+  Cache-Control: public, max-age=0, must-revalidate
+/es/conectores/
+  Cache-Control: public, max-age=0, must-revalidate
+/es/conectores/*
+  Cache-Control: public, max-age=0, must-revalidate
+/es/instalar/
+  Cache-Control: public, max-age=0, must-revalidate
+/es/limites/
+  Cache-Control: public, max-age=0, must-revalidate
+/robots.txt
+  Cache-Control: public, max-age=0, must-revalidate
+/sitemap.xml
+  Cache-Control: public, max-age=0, must-revalidate
+/404.html
   Cache-Control: public, max-age=0, must-revalidate
 
 # Archivos con hash en el nombre (Vite) o versión en la URL (capturas).

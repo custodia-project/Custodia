@@ -2,3 +2,8 @@ node_modules
 dist
 /index.html
 /es/
+# Páginas generadas por scripts/build-site.mjs para las entradas de Vite.
+/inventory/
+/connectors/
+/install/
+/limits/

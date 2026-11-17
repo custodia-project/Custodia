@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#06070a" />
+    <title>Page not found · Custodia</title>
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: oklch(0.155 0.034 258);
+        color: oklch(0.965 0.008 258);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        background:
+          radial-gradient(60rem 40rem at 50% -20%, oklch(0.22 0.05 258), transparent 70%),
+          oklch(0.155 0.034 258);
+      }
+      main { width: min(100%, 38rem); }
+      .wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        color: inherit;
+        text-decoration: none;
+        font-weight: 650;
+        letter-spacing: -0.02em;
+      }
+      .wordmark img { width: 28px; height: 28px; }
+      .code {
+        margin: 4rem 0 0;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.75rem;
+        letter-spacing: 0.14em;
+        color: oklch(0.91 0.19 124);
+      }
+      h1 {
+        margin: 0.5rem 0 1rem;
+        font-size: clamp(2rem, 7vw, 3.25rem);
+        line-height: 1.02;
+        letter-spacing: -0.045em;
+      }
+      p { margin: 0 0 1rem; color: oklch(0.81 0.022 258); line-height: 1.65; }
+      .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 2rem; }
+      a.button {
+        display: inline-flex;
+        min-height: 44px;
+        align-items: center;
+        padding: 0 1.1rem;
+        border: 1px solid oklch(0.3 0.041 258);
+        border-radius: 8px;
+        color: inherit;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a.primary {
+        border-color: transparent;
+        background: oklch(0.91 0.19 124);
+        color: oklch(0.22 0.06 124);
+      }
+      a:focus-visible { outline: 2px solid oklch(0.91 0.19 124); outline-offset: 3px; }
+      .es { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid oklch(0.25 0.04 258); }
+      .es h2 { margin: 0 0 0.5rem; font-size: 1.1rem; letter-spacing: -0.02em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="wordmark" href="/" aria-label="Custodia, home">
+        <img src="/mark.svg" alt="" width="28" height="28" />
+        <span>custodia</span>
+      </a>
+      <p class="code">404</p>
+      <h1>Page not found</h1>
+      <p>The address may have changed, or the page may not exist. The product site has an English home and a Spanish version.</p>
+      <div class="actions">
+        <a class="button primary" href="/">Home</a>
+        <a class="button" href="/es/">Español</a>
+        <a class="button" href="https://github.com/custodia-project/Custodia">Source and docs</a>
+      </div>
+      <section class="es" lang="es">
+        <h2>Página no encontrada</h2>
+        <p>La dirección puede haber cambiado o la página no existe. El sitio está en inglés y en español.</p>
+      </section>
+    </main>
+  </body>
+</html>

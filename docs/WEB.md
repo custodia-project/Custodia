@@ -101,6 +101,10 @@ muestre: usa sus colores, sus logos, sus nombres de vistas y sus cuatro
 etiquetas de vínculo, y sus pantallas son capturas reales de `web/`. Si un
 texto o un elemento del sitio no se puede encontrar al abrir la demo, sobra.
 Cuando la demo cambia, se regeneran las capturas y se revisan los textos.
+Las páginas de contenido (`/inventory/`, `/connectors/`, `/install/`,
+`/limits/` y sus pares) no son pantallas de la demo: explican contratos,
+requisitos, versiones y límites, con el mismo sistema visual y enlaces a la
+evidencia pública.
 
 El sitio se diseña con un método, no con adjetivos. «Moderno» o «limpio» no
 describen nada; cada pedido de diseño nombra:
@@ -164,6 +168,57 @@ Reglas que siguen de ahí:
 `npm run verify:web` desde la raíz: tipos, lint, estilos, pruebas unitarias,
 build de la demo y e2e con Chromium. El sitio se construye con
 `npm run build:site`.
+
+## Descubrimiento e indexación
+
+El sitio publica su capa para buscadores y asistentes con archivos de
+`site/public/` y el sitemap generado en el build:
+
+- [robots.txt](../site/public/robots.txt) permite la búsqueda normal y los
+  agentes de búsqueda o de lectura pedidos por una persona (`OAI-SearchBot`,
+  `ChatGPT-User`, `Claude-SearchBot`, `Claude-User`, `PerplexityBot`,
+  `Perplexity-User`). Separa los recolectores de entrenamiento (`GPTBot`,
+  `ClaudeBot`, `Google-Extended`, `Applebot-Extended`, `CCBot`), que no hacen
+  falta para aparecer en una respuesta.
+- `sitemap.xml` se genera después de Vite con
+  [build-sitemap.mjs](../site/scripts/build-sitemap.mjs) desde
+  [content.mjs](../site/site/content.mjs): todas las páginas canónicas y sus
+  pares `hreflang`; `robots.txt` lo referencia.
+- [404.html](../site/public/404.html) es la página que Cloudflare Pages usa
+  para una ruta inexistente. Sin ese archivo, Pages responde la portada con
+  `200 text/html`, que es un soft 404 y no debe volver a pasar.
+- `site/site/template.html` y `site/site/article.html` emiten JSON-LD por
+  página (`WebSite`, `SoftwareApplication` y, en las páginas de contenido,
+  `TechArticle` y `BreadcrumbList`). Declara el producto y sus capacidades
+  actuales; no declara `softwareVersion` ni `offers` porque la primera release
+  pública todavía no existe.
+
+Las páginas de contenido son `/inventory/`, `/connectors/`,
+`/connectors/cyberark-pam/`, `/connectors/wazuh/`, `/install/` y `/limits/`,
+con sus pares `/es/`; los textos viven en
+[articles-en.mjs](../site/site/articles-en.mjs) y
+[articles-es.mjs](../site/site/articles-es.mjs). Cada página enlaza los
+contratos públicos que la respaldan y separa lo implementado, lo probado, lo
+aceptado y lo planificado.
+
+El gate [verify:site](../package.json) construye el sitio y ejecuta
+[check-site.mjs](../site/scripts/check-site.mjs). Falla si `robots.txt` o
+`sitemap.xml` faltan o vuelven a ser HTML, si `404.html` falta o no es la
+página propia, si el sitemap y los canonical divergen, o si el JSON-LD no
+coincide con la página. El job `site` del
+[CI](../.github/workflows/ci.yml) lo corre en cada push y pull request.
+
+Después de publicar, la misma comprobación se hace contra el host real:
+
+```bash
+node site/scripts/check-site.mjs --live
+```
+
+Comprueba tipos de contenido, el 404 real y el JSON-LD de todas las páginas. La
+verificación en Search Console, Bing Webmaster Tools y el envío del sitemap
+son pasos del dueño: la indexación tarda y no está garantizada. No se publica
+`llms.txt` todavía; no sustituye el contenido ni la indexación y se evaluará
+como complemento cuando existan las páginas que responden preguntas.
 
 ## Entrada firmada de Ozal
 
