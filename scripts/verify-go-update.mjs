@@ -47,7 +47,14 @@ async function start(pageOrigin) {
   server = spawn(join(prefix, 'bin', 'custodia'), ['serve', '--auth-mode', 'local', '--public-origin', pageOrigin, '--dir', data, '--web-dir', join(prefix, 'lib', 'custodia', 'web'), '--listen', `127.0.0.1:${port}`, '--tls-cert', join(config, 'tls', 'server.crt'), '--tls-key', join(config, 'tls', 'server.key'), '--master-key', join(config, 'master.key'), '--update-manifest', manifestPath], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   server.unref();
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const code = run('curl', ['-ks', '-o', '/dev/null', '-w', '%{http_code}', `${pageOrigin}/api/health`]).trim();
+    let code;
+    try {
+      code = run('curl', ['-ks', '--connect-timeout', '1', '--max-time', '2', '-o', '/dev/null', '-w', '%{http_code}', `${pageOrigin}/api/health`]).trim();
+    } catch (error) {
+      // A refused connection is expected until the new process binds its
+      // listener. Keep polling; other curl errors still fail the gate.
+      if (error.status !== 7) throw error;
+    }
     if (code === '200') return;
     await new Promise((done) => setTimeout(done, 250));
   }
