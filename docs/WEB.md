@@ -192,6 +192,16 @@ El sitio publica su capa para buscadores y asistentes con archivos de
   `TechArticle` y `BreadcrumbList`). Declara el producto y sus capacidades
   actuales; no declara `softwareVersion` ni `offers` porque la primera release
   pública todavía no existe.
+- `site/public/<clave>.txt` es la clave pública de IndexNow. Después de
+  publicar, `npm run indexnow` lee el sitemap en vivo y envía sus URLs a
+  `api.indexnow.org`; un `200` o `202` confirma que fueron aceptadas, no que
+  estén indexadas. `npm run indexnow -- --dry-run` valida clave y sitemap sin
+  enviar nada. Google no usa IndexNow: su camino es el sitemap y Search
+  Console.
+- Las etiquetas de verificación de Search Console y Bing se emiten desde
+  `site/site/verification.mjs` o desde `GOOGLE_SITE_VERIFICATION` y
+  `BING_SITE_VERIFICATION`. Son tokens públicos que aparecen en el HTML;
+  nunca deben contener una clave de API ni un secreto.
 
 Las páginas de contenido son `/inventory/`, `/connectors/`,
 `/connectors/cyberark-pam/`, `/connectors/wazuh/`, `/install/` y `/limits/`,
@@ -212,9 +222,11 @@ Después de publicar, la misma comprobación se hace contra el host real:
 
 ```bash
 node site/scripts/check-site.mjs --live
+npm run indexnow
 ```
 
-Comprueba tipos de contenido, el 404 real y el JSON-LD de todas las páginas. La
+`check-site` comprueba tipos de contenido, el 404 real y el JSON-LD de todas
+las páginas; `indexnow` avisa a Bing y a los demás motores de IndexNow. La
 verificación en Search Console, Bing Webmaster Tools y el envío del sitemap
 son pasos del dueño: la indexación tarda y no está garantizada. No se publica
 `llms.txt` todavía; no sustituye el contenido ni la indexación y se evaluará

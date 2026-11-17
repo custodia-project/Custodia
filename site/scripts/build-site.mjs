@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { articles, articleKeys, base, demoBase, nav, reviewed, siblingOf, ui } from '../site/content.mjs';
 import { pages as homePages } from '../site/strings.mjs';
+import { verification } from '../site/verification.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const homeTemplate = await readFile(join(root, 'site/template.html'), 'utf8');
@@ -31,6 +32,15 @@ const shotVersion = shots.digest('hex').slice(0, 10);
 const demo = (process.env.CUSTODIA_DEMO_URL || demoBase).replace(/\/$/, '');
 const homeHref = (lang) => (lang === 'en' ? '/' : '/es/');
 const ogLocale = (lang) => (lang === 'en' ? 'en_US' : 'es_ES');
+const escapeAttr = (value) => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/"/g, '&quot;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+const verificationMeta = (name, token) => {
+  const value = String(token ?? '').trim();
+  return value ? `<meta name="${name}" content="${escapeAttr(value)}" />` : '';
+};
 
 function fill(template, values, label) {
   const withPartials = template.replace('{{header}}', header).replace('{{footer}}', footer);
@@ -117,6 +127,14 @@ function commonValues(lang, page, other) {
     demoLang: `?lang=${lang}`,
     reviewed,
     shotVersion,
+    googleVerification: verificationMeta(
+      'google-site-verification',
+      process.env.GOOGLE_SITE_VERIFICATION || verification.google,
+    ),
+    bingVerification: verificationMeta(
+      'msvalidate.01',
+      process.env.BING_SITE_VERIFICATION || verification.bing,
+    ),
   };
 }
 
