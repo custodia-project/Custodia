@@ -59,6 +59,13 @@ func ResolveCredential(reference string) (string, error) {
 		if path == "" || !filepath.IsAbs(path) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 			return "", errors.New("probe credential file must be an absolute local path")
 		}
+		directory, err := probeSecretDirectory()
+		if err != nil {
+			return "", err
+		}
+		if !pathInside(directory, path) {
+			return "", errors.New("probe credential file must be inside CUSTODIA_PROBE_SECRET_DIR")
+		}
 		return readSecretFile(path)
 	case strings.HasPrefix(reference, "vault:"):
 		return "", errors.New("vault references require the Custodia secret store")
@@ -67,14 +74,27 @@ func ResolveCredential(reference string) (string, error) {
 		if !validReferenceName(name) {
 			return "", errors.New("probe secret reference is invalid")
 		}
-		directory := strings.TrimSpace(os.Getenv("CUSTODIA_PROBE_SECRET_DIR"))
-		if directory == "" || !filepath.IsAbs(directory) {
-			return "", errors.New("probe secret provider is not configured")
+		directory, err := probeSecretDirectory()
+		if err != nil {
+			return "", err
 		}
 		return readSecretFile(filepath.Join(directory, name))
 	default:
 		return "", errors.New("probe credential reference is not supported")
 	}
+}
+
+func probeSecretDirectory() (string, error) {
+	directory := strings.TrimSpace(os.Getenv("CUSTODIA_PROBE_SECRET_DIR"))
+	if directory == "" || !filepath.IsAbs(directory) || strings.IndexFunc(directory, unicode.IsControl) >= 0 {
+		return "", errors.New("probe secret provider is not configured")
+	}
+	return filepath.Clean(directory), nil
+}
+
+func pathInside(directory, path string) bool {
+	relative, err := filepath.Rel(filepath.Clean(directory), filepath.Clean(path))
+	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
 func readSecretFile(path string) (string, error) {
@@ -142,7 +162,15 @@ func PrepareWithResolver(ctx context.Context, plan Plan, resolver Resolver) (*ht
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
 	if plan.AuthMode == AuthMTLS {
-		certificate, err := tls.LoadX509KeyPair(plan.ClientCertFile, plan.ClientKeyFile)
+		certPEM, err := readTLSFile(plan.ClientCertFile, "probe client certificate")
+		if err != nil {
+			return nil, err
+		}
+		keyPEM, err := readTLSFile(plan.ClientKeyFile, "probe client key")
+		if err != nil {
+			return nil, err
+		}
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
 			return nil, errors.New("probe client certificate could not be loaded")
 		}
@@ -333,13 +361,36 @@ func fetchOAuthToken(ctx context.Context, client *http.Client, plan Plan, client
 	return token, nil
 }
 
+const maxTLSFileBytes = 1 << 20
+
+func readTLSFile(path, description string) ([]byte, error) {
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() || before.Size() > maxTLSFileBytes {
+		return nil, errors.New(description + " must be a small regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, errors.New(description + " could not be read")
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(before, info) {
+		return nil, errors.New(description + " changed while reading")
+	}
+	content, err := io.ReadAll(io.LimitReader(file, maxTLSFileBytes+1))
+	if err != nil || len(content) > maxTLSFileBytes {
+		return nil, errors.New(description + " is oversized")
+	}
+	return content, nil
+}
+
 func loadRootCAs(path string) (*x509.CertPool, error) {
 	if path == "" {
 		return nil, nil
 	}
-	content, err := os.ReadFile(path)
+	content, err := readTLSFile(path, "probe CA file")
 	if err != nil {
-		return nil, errors.New("probe CA file could not be read")
+		return nil, err
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(content) {

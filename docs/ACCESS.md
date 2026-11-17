@@ -159,10 +159,11 @@ Guardar crea o reemplaza un **borrador**: desactiva el proveedor, borra la
 prueba anterior y revoca las sesiones OIDC vivas. Una identidad OIDC sólo se
 emite cuando se activa una configuración probada.
 
-Secreto. `client_secret_ref` admite `env:NOMBRE`, `file:/RUTA_ABSOLUTA` o
-`secret:NOMBRE` (directorio en `CUSTODIA_OIDC_SECRET_DIR`). El valor se lee en
-memoria al iniciar el flujo; nunca se guarda, audita, devuelve ni aparece en
-logs. Un cliente público puede dejar la referencia vacía.
+Secreto. `client_secret_ref` admite `env:NOMBRE`, `file:/RUTA` o
+`secret:NOMBRE`. Las formas `file:` y `secret:` leen únicamente dentro de
+`CUSTODIA_OIDC_SECRET_DIR`; no se acepta una ruta arbitraria del host. El
+valor se lee en memoria al iniciar el flujo; nunca se guarda, audita, devuelve
+ni aparece en logs. Un cliente público puede dejar la referencia vacía.
 
 Prueba y activación. `POST /api/access/oidc/test` lee el descubrimiento del
 emisor, exige que `issuer` coincida exactamente, que los endpoints sean HTTPS

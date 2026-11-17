@@ -637,6 +637,33 @@ func (s *Store) EndOIDCSession(ctx context.Context, p Principal, tokenHash strin
 	return tx.Commit()
 }
 
+// manageableOIDCUser returns an approved reader whose complete scope the
+// acting administrator holds. Administrators are never remote targets.
+func manageableOIDCUser(ctx context.Context, tx *sql.Tx, actor Principal, issuer, subject string) (int, error) {
+	var target int
+	if err := tx.QueryRowContext(ctx, "SELECT principal_id FROM oidc_accounts WHERE issuer=? AND subject=?", issuer, subject).Scan(&target); err != nil {
+		return 0, ErrDenied
+	}
+	if target == actor.ID {
+		return 0, ErrDenied
+	}
+	var admins int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM gateway_administrators WHERE principal_id=?", target).Scan(&admins); err != nil {
+		return 0, err
+	}
+	if admins != 0 {
+		return 0, ErrDenied
+	}
+	var outside int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM lab_grants g WHERE g.principal_id=? AND NOT EXISTS(SELECT 1 FROM lab_grants own WHERE own.principal_id=? AND own.connection_id=g.connection_id)", target, actor.ID).Scan(&outside); err != nil {
+		return 0, err
+	}
+	if outside != 0 {
+		return 0, ErrDenied
+	}
+	return target, nil
+}
+
 // SetOIDCUserEnabled disables an approved reader (revoking sessions) or
 // re-enables it. Administrators are never remotes created by approval.
 func (s *Store) SetOIDCUserEnabled(ctx context.Context, actor Principal, issuer, subject string, enabled bool, now time.Time) error {
@@ -649,25 +676,8 @@ func (s *Store) SetOIDCUserEnabled(ctx context.Context, actor Principal, issuer,
 		return err
 	}
 	var target int
-	if err = tx.QueryRowContext(ctx, "SELECT principal_id FROM oidc_accounts WHERE issuer=? AND subject=?", issuer, subject).Scan(&target); err != nil {
-		return ErrDenied
-	}
-	if target == actor.ID {
-		return ErrDenied
-	}
-	var admins int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM gateway_administrators WHERE principal_id=?", target).Scan(&admins); err != nil {
+	if target, err = manageableOIDCUser(ctx, tx, actor, issuer, subject); err != nil {
 		return err
-	}
-	if admins != 0 {
-		return ErrDenied
-	}
-	var outside int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM lab_grants g WHERE g.principal_id=? AND NOT EXISTS(SELECT 1 FROM lab_grants own WHERE own.principal_id=? AND own.connection_id=g.connection_id)", target, actor.ID).Scan(&outside); err != nil {
-		return err
-	}
-	if outside != 0 {
-		return ErrDenied
 	}
 	flag := 0
 	action := "disable_oidc_user"
@@ -702,8 +712,8 @@ func (s *Store) RevokeOIDCSessions(ctx context.Context, actor Principal, issuer,
 		return err
 	}
 	var target int
-	if err = tx.QueryRowContext(ctx, "SELECT principal_id FROM oidc_accounts WHERE issuer=? AND subject=?", issuer, subject).Scan(&target); err != nil {
-		return ErrDenied
+	if target, err = manageableOIDCUser(ctx, tx, actor, issuer, subject); err != nil {
+		return err
 	}
 	revoked, err := tx.ExecContext(ctx, "DELETE FROM local_sessions WHERE principal_id=?", target)
 	if err != nil {

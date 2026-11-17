@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -255,5 +256,49 @@ func TestApplyVerifiesTheManifestBeforeExtracting(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "release signature rejected") {
 		t.Fatalf("unsigned archive was not rejected at the signature: %v", err)
+	}
+}
+
+func TestReadUpdateRequestRefusesLinksFifosAndOversize(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, []byte(`{"manifest":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readUpdateRequest(link); err == nil {
+		t.Fatal("symlinked request accepted")
+	}
+	fifo := filepath.Join(root, "request.json")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readUpdateRequest(fifo); err == nil {
+		t.Fatal("FIFO request accepted")
+	}
+	large := filepath.Join(root, "large.json")
+	if err := os.WriteFile(large, bytes.Repeat([]byte("x"), maxUpdateRequestBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readUpdateRequest(large); err == nil {
+		t.Fatal("oversized request accepted")
+	}
+}
+
+func TestApplyRequestConsumesAnInvalidRequest(t *testing.T) {
+	root := t.TempDir()
+	request := filepath.Join(root, "request.json")
+	if err := os.Mkdir(request, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := ApplyRequest(context.Background(), request, Options{AllowedSigners: filepath.Join(root, "signers")})
+	if err == nil {
+		t.Fatal("directory request accepted")
+	}
+	if _, statErr := os.Lstat(request); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid request was not consumed: %v", statErr)
 	}
 }

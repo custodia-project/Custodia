@@ -112,6 +112,11 @@ if [ -n "$ALLOWED_SIGNERS" ]; then
     http://*|https://*) die "--allowed-signers must be a local file obtained separately from the release" ;;
   esac
   [ -f "$ALLOWED_SIGNERS" ] || die "allowed signers not found: $ALLOWED_SIGNERS"
+  [ ! -L "$ALLOWED_SIGNERS" ] || die "--allowed-signers must not be a symbolic link"
+  [ "$((0$(stat -c '%a' "$ALLOWED_SIGNERS") & 022))" -eq 0 ] || die "--allowed-signers must not be writable by group or others"
+  if [ "$(id -u)" = 0 ] && [ "$(stat -c '%u' "$ALLOWED_SIGNERS")" != 0 ]; then
+    die "--allowed-signers must be owned by root when the installer runs as root"
+  fi
 else
   case "$RELEASE_KEY" in
     custodia-release\ ssh-ed25519\ *) ;;

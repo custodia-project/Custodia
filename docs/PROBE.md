@@ -49,9 +49,10 @@ El plan resultante es saneado y puede registrarse sin exponer credenciales.
 
 ## Transporte implementado
 
-- `ResolveCredential` resuelve `env:`, `file:` absoluto y `secret:NAME` desde
-  `CUSTODIA_PROBE_SECRET_DIR`; el directorio debe ser absoluto, el archivo
-  regular, no symlink y acotado. `secret:` no usa el repositorio.
+- `ResolveCredential` resuelve `env:`, `file:` dentro de
+  `CUSTODIA_PROBE_SECRET_DIR` y `secret:NAME` en ese mismo directorio; el
+  directorio debe ser absoluto, el archivo regular, no symlink y acotado.
+  `secret:` no usa el repositorio. `file:` no acepta rutas arbitrarias del host.
 - TLS verificado con mínimo TLS 1.2; CA adicional por archivo, sin
   `InsecureSkipVerify` ni proxy implícito.
 - Basic exchange: `POST /security/user/authenticate` con Basic auth y un

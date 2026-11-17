@@ -611,22 +611,26 @@ func TestOIDCSecretReferences(t *testing.T) {
 	if _, err := resolveOIDCSecret("env:CUSTODIA_OIDC_EMPTY_SECRET"); err == nil {
 		t.Fatal("empty environment secret accepted")
 	}
-	file := filepath.Join(t.TempDir(), "secret")
+	directory := t.TempDir()
+	t.Setenv("CUSTODIA_OIDC_SECRET_DIR", directory)
+	file := filepath.Join(directory, "secret")
 	if err := os.WriteFile(file, []byte("file-secret\r\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if value, err := resolveOIDCSecret("file:" + file); err != nil || value != "file-secret" {
 		t.Fatal(value, err)
 	}
-	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "client"), []byte("provider-secret"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CUSTODIA_OIDC_SECRET_DIR", directory)
 	if value, err := resolveOIDCSecret("secret:client"); err != nil || value != "provider-secret" {
 		t.Fatal(value, err)
 	}
-	for _, reference := range []string{"literal-value", "env:", "file:relative", "secret:../escape"} {
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("outside-secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{"literal-value", "env:", "file:relative", "file:" + outside, "secret:../escape"} {
 		if _, err := resolveOIDCSecret(reference); err == nil {
 			t.Fatalf("unsafe reference accepted: %q", reference)
 		}

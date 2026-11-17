@@ -195,14 +195,20 @@ func TestResolveCredentialReferences(t *testing.T) {
 	if err = os.WriteFile(path, []byte("file-token-value\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CUSTODIA_PROBE_SECRET_DIR", filepath.Dir(path))
 	value, err = ResolveCredential("file:" + path)
 	if err != nil || value != "file-token-value" {
 		t.Fatal(value, err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	for _, reference := range []string{
 		"env:CUSTODIA_PROBE_MISSING_TOKEN",
 		"env:",
 		"file:relative-token",
+		"file:" + outside,
 		"secret:tenant-token",
 		"literal-secret",
 	} {
@@ -221,10 +227,12 @@ func TestResolveCredentialReferences(t *testing.T) {
 }
 
 func TestResolveCredentialRejectsUnreadableAndOversizedFiles(t *testing.T) {
-	if _, err := ResolveCredential("file:" + filepath.Join(t.TempDir(), "missing")); err == nil {
+	directory := t.TempDir()
+	t.Setenv("CUSTODIA_PROBE_SECRET_DIR", directory)
+	if _, err := ResolveCredential("file:" + filepath.Join(directory, "missing")); err == nil {
 		t.Fatal("missing credential file accepted")
 	}
-	path := filepath.Join(t.TempDir(), "large")
+	path := filepath.Join(directory, "large")
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", maxCredentialBytes+1)), 0600); err != nil {
 		t.Fatal(err)
 	}

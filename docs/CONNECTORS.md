@@ -99,7 +99,9 @@ Reglas del alta:
 - La URL de un conector implementado debe ser HTTPS, sin usuario, query ni
   fragmento; se admite un prefijo de path (por ejemplo `/PasswordVault`).
 - La credencial es siempre una referencia `env:`, `file:` o `secret:`; el alta
-  rechaza valores literales y nunca contacta el tenant.
+  rechaza valores literales y nunca contacta el tenant. `file:` y `secret:` se
+  resuelven sólo dentro de `CUSTODIA_PROBE_SECRET_DIR`, nunca contra una ruta
+  arbitraria del host.
 - Cada colección elegida debe existir en el descriptor; el alta deduplica y
   crea una fila de fuente por colección bajo un mismo `group_id`.
 - Todas las colecciones comparten URL, credencial, CA y auth; el operador

@@ -103,17 +103,17 @@ func pkceChallenge(verifier string) string {
 
 func (h *handler) oidcStateCookieName() string {
 	if strings.HasPrefix(h.config.PublicOrigin, "https://") {
-		return "__Secure-custodia_oidc_state"
+		return "__Host-custodia_oidc_state"
 	}
 	return "custodia_oidc_state"
 }
 
 func (h *handler) oidcStateCookie(value string) *http.Cookie {
-	return &http.Cookie{Name: h.oidcStateCookieName(), Value: value, Path: "/api/auth/oidc", MaxAge: int(lab.OIDCStateLifetime / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+	return &http.Cookie{Name: h.oidcStateCookieName(), Value: value, Path: "/", MaxAge: int(lab.OIDCStateLifetime / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
 }
 
 func (h *handler) clearOIDCStateCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: h.oidcStateCookieName(), Value: "", Path: "/api/auth/oidc", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: h.oidcStateCookieName(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 }
 
 func (h *handler) oidcStateFromRequest(r *http.Request) string {
@@ -336,20 +336,40 @@ func resolveOIDCSecret(reference string) (string, error) {
 		if !filepath.IsAbs(path) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 			return "", errors.New("la referencia de archivo debe ser una ruta absoluta")
 		}
+		directory, err := oidcSecretDirectory()
+		if err != nil {
+			return "", err
+		}
+		if !pathInside(directory, path) {
+			return "", errors.New("la referencia de archivo debe estar dentro de CUSTODIA_OIDC_SECRET_DIR")
+		}
 		return readOIDCSecret(path)
 	case strings.HasPrefix(reference, "secret:"):
 		name := strings.TrimPrefix(reference, "secret:")
 		if !validOIDCRefName(name) {
 			return "", errors.New("referencia de secreto inválida")
 		}
-		directory := strings.TrimSpace(os.Getenv("CUSTODIA_OIDC_SECRET_DIR"))
-		if directory == "" || !filepath.IsAbs(directory) {
-			return "", errors.New("el proveedor de secretos no está configurado")
+		directory, err := oidcSecretDirectory()
+		if err != nil {
+			return "", err
 		}
 		return readOIDCSecret(filepath.Join(directory, name))
 	default:
 		return "", errors.New("referencia de secreto no soportada")
 	}
+}
+
+func oidcSecretDirectory() (string, error) {
+	directory := strings.TrimSpace(os.Getenv("CUSTODIA_OIDC_SECRET_DIR"))
+	if directory == "" || !filepath.IsAbs(directory) || strings.IndexFunc(directory, unicode.IsControl) >= 0 {
+		return "", errors.New("el proveedor de secretos no está configurado")
+	}
+	return filepath.Clean(directory), nil
+}
+
+func pathInside(directory, path string) bool {
+	relative, err := filepath.Rel(filepath.Clean(directory), filepath.Clean(path))
+	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
 func validOIDCRefName(name string) bool {
@@ -406,6 +426,13 @@ func validateOIDCConfig(c lab.OIDCConfig, publicOrigin string) error {
 			path := strings.TrimPrefix(c.ClientSecretRef, "file:")
 			if !filepath.IsAbs(path) || strings.IndexFunc(path, unicode.IsControl) >= 0 {
 				return fmt.Errorf("la referencia de archivo del secreto debe ser una ruta absoluta")
+			}
+			directory, err := oidcSecretDirectory()
+			if err != nil {
+				return err
+			}
+			if !pathInside(directory, path) {
+				return fmt.Errorf("la referencia de archivo debe estar dentro de CUSTODIA_OIDC_SECRET_DIR")
 			}
 		default:
 			return fmt.Errorf("la referencia del secreto debe usar env:, file: o secret:")

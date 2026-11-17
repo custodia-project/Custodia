@@ -31,6 +31,8 @@ const (
 	// maxManifestBytes bounds manifest.json itself. The real one is a few
 	// kilobytes; the allowance also covers the detached signature file.
 	maxManifestBytes = 1 << 20
+	// maxUpdateRequestBytes bounds the service-owned request document.
+	maxUpdateRequestBytes = 64 << 10
 	// maxExtractBytes is the absolute ceiling for one release, independent of
 	// what the signed manifest claims.
 	maxExtractBytes = 1 << 30
@@ -322,6 +324,7 @@ func readArchiveManifest(archive string) ([]byte, error) {
 	defer gzipReader.Close()
 	bounded := &io.LimitedReader{R: gzipReader, N: maxExtractBytes + 1}
 	reader := tar.NewReader(bounded)
+	entries := 0
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
@@ -332,6 +335,10 @@ func readArchiveManifest(archive string) ([]byte, error) {
 				return nil, errors.New("release archive exceeds the extraction limit")
 			}
 			return nil, err
+		}
+		entries++
+		if entries > maxExtractEntries {
+			return nil, errors.New("release archive contains too many entries")
 		}
 		name := filepath.Clean(header.Name)
 		if filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
@@ -692,19 +699,46 @@ func waitHealth(ctx context.Context, target, caFile, serverName string) error {
 // request is untrusted: an allowed_signers field in it is ignored, and the
 // release is verified only against options.AllowedSigners, pinned by the
 // privileged caller.
+// readUpdateRequest opens the service-owned request without following links
+// and without blocking on a FIFO. The path is fixed inside the service data
+// directory, which the service account controls; root must treat every byte
+// and every file type there as hostile.
+func readUpdateRequest(path string) ([]byte, error) {
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxUpdateRequestBytes {
+		return nil, errors.New("update request must be a small regular file")
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxUpdateRequestBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxUpdateRequestBytes {
+		return nil, errors.New("update request exceeds its size limit")
+	}
+	return body, nil
+}
+
 func ApplyRequest(ctx context.Context, requestPath string, options Options) error {
 	if strings.TrimSpace(options.AllowedSigners) == "" {
 		return errors.New("console updates require a pinned --allowed-signers")
 	}
-	body, err := os.ReadFile(requestPath)
-	if err != nil {
-		return err
+	body, readErr := readUpdateRequest(requestPath)
+	// Consume the path whatever it was (regular file, link, FIFO or
+	// directory). RemoveAll unlinks a link instead of following it.
+	removeErr := os.RemoveAll(requestPath)
+	if readErr != nil {
+		return readErr
 	}
-	// Consume the request before acting on it. The path unit fires while the
-	// file exists, so a request left behind after a failure would re-run the
-	// update and its rollback forever. Unlinking does not follow links.
-	if err := os.Remove(requestPath); err != nil {
-		return fmt.Errorf("consume update request: %w", err)
+	if removeErr != nil {
+		return fmt.Errorf("consume update request: %w", removeErr)
 	}
 	var request struct {
 		Manifest json.RawMessage `json:"manifest"`
@@ -766,7 +800,17 @@ func download(ctx context.Context, location, target string) error {
 	if err != nil {
 		return err
 	}
-	response, err := http.DefaultClient.Do(request)
+	client := &http.Client{Timeout: 10 * time.Minute}
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return errors.New("release download has too many redirects")
+		}
+		if next.URL.Scheme != "https" {
+			return errors.New("release download redirect must stay on HTTPS")
+		}
+		return nil
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}

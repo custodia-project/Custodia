@@ -98,6 +98,7 @@ func TestProbePAMCLIFileCredentialTLSFixture(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte("cli-file-token\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("CUSTODIA_PROBE_SECRET_DIR", filepath.Dir(tokenFile))
 	output, err := runProbeCLI(t,
 		"probe-pam", "--authorized", "--url", server.URL,
 		"--credential-ref", "file:"+tokenFile,
