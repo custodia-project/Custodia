@@ -1,9 +1,21 @@
 #!/bin/sh
 # Custodia single-command installer for Linux x86_64/arm64.
-# Verifies the release manifest signature and archive checksum before touching
-# the host. Idempotent: data and master.key are preserved; use --uninstall to
-# remove the service and binary (data only with --purge).
+#
+#   curl -fsSL https://custodia.octaviosantacruz.com/install.sh | sudo sh
+#
+# Without --package it reads the signed release catalog of BASE_URL, verifies
+# it with the release key embedded below, downloads the package it names and
+# verifies the package signature and every file before touching the host.
+# Idempotent: data and master.key are preserved; use --uninstall to remove
+# the service and binary (data only with --purge).
 set -eu
+
+# Release trust anchor (OpenSSH allowed_signers line), written into the
+# published copy of this script by scripts/release-site.mjs. The same key is
+# published at BASE_URL/allowed_signers to compare it another way.
+RELEASE_KEY='__CUSTODIA_RELEASE_KEY__'
+BASE_URL=https://custodia.octaviosantacruz.com
+CHANNEL=stable
 
 PREFIX=/usr/local
 DATA_DIR=/var/lib/custodia
@@ -44,11 +56,15 @@ while [ $# -gt 0 ]; do
     --signature) SIGNATURE=$2; shift 2 ;;
     --allowed-signers) ALLOWED_SIGNERS=$2; shift 2 ;;
     --update-manifest) UPDATE_MANIFEST=$2; shift 2 ;;
+    --base-url) BASE_URL=$2; shift 2 ;;
+    --channel) CHANNEL=$2; shift 2 ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --purge) PURGE=1; shift ;;
     -h|--help)
-      say "usage: install.sh --version V --package FILE|URL --sha256 HEX --allowed-signers FILE --public-origin URL"
+      say "usage: install.sh [--public-origin URL] [--version V] [--tls-cert FILE --tls-key FILE]"
+      say "                    [--channel stable] [--base-url URL] [--allowed-signers FILE]"
+      say "                    [--package FILE|URL --sha256 HEX --version V]   (explicit package)"
       say "                    [--prefix DIR] [--data-dir DIR] [--config-dir DIR] [--user USER]"
       say "                    [--listen HOST:PORT] [--public-origin URL] [--tls-cert FILE --tls-key FILE]"
       say "                    [--no-systemd] [--uninstall [--purge]]"
@@ -74,25 +90,67 @@ if [ "$UNINSTALL" = 1 ]; then
   exit 0
 fi
 
-[ "$(id -u)" = 0 ] || [ "$NO_SYSTEMD" = 1 ] || die "run as root (or use --no-systemd for a test prefix)"
-[ -n "$VERSION" ] || die "--version is required"
-[ -n "$PACKAGE" ] || die "--package is required (local archive or URL)"
-[ -n "$PACKAGE_SHA256" ] || die "--sha256 is required"
-[ -n "$ALLOWED_SIGNERS" ] || die "--allowed-signers is required"
-[ -n "$PUBLIC_ORIGIN" ] || die "--public-origin is required (for example https://custodia.example:8443)"
+[ "$(id -u)" = 0 ] || [ "$NO_SYSTEMD" = 1 ] || die "run as root: curl -fsSL $BASE_URL/install.sh | sudo sh"
+for tool in curl ssh-keygen sha256sum tar openssl; do
+  command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
+done
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
-# Signature and allowed_signers may also be release URLs; keep them local for
-# ssh-keygen without trusting the shell's current directory.
-# The manifest signature travels inside the package and is verified there;
-# --signature is accepted for compatibility and not needed.
-# The release key is the trust anchor: it must come from a channel other than
-# the package, so the installer never downloads it.
-case "$ALLOWED_SIGNERS" in
-  http://*|https://*) die "--allowed-signers must be a local file obtained separately from the release" ;;
-esac
-[ -f "$ALLOWED_SIGNERS" ] || die "allowed signers not found: $ALLOWED_SIGNERS"
+fetch() { curl -fsSL --proto '=https' --tlsv1.2 "$1" -o "$2"; }
+
+# The release key is the trust anchor. It comes from this script (embedded at
+# release time) or from --allowed-signers, never from the release itself.
+# The manifest signature travels inside the package; --signature is accepted
+# for compatibility and not needed.
+if [ -n "$ALLOWED_SIGNERS" ]; then
+  case "$ALLOWED_SIGNERS" in
+    http://*|https://*) die "--allowed-signers must be a local file obtained separately from the release" ;;
+  esac
+  [ -f "$ALLOWED_SIGNERS" ] || die "allowed signers not found: $ALLOWED_SIGNERS"
+else
+  case "$RELEASE_KEY" in
+    custodia-release\ ssh-ed25519\ *) ;;
+    *) die "this copy of install.sh has no release key; use $BASE_URL/install.sh or pass --allowed-signers" ;;
+  esac
+  printf '%s\n' "$RELEASE_KEY" > "$work/allowed_signers"
+  ALLOWED_SIGNERS=$work/allowed_signers
+fi
+
+# Without an explicit package, resolve it from the signed release catalog:
+# the channel's latest release, or the one --version names.
+if [ -z "$PACKAGE" ]; then
+  case "$BASE_URL" in https://*) ;; *) die "--base-url must be HTTPS" ;; esac
+  BASE_URL=${BASE_URL%/}
+  if [ -n "$VERSION" ]; then catalog=$BASE_URL/releases/v$VERSION/linux-$ARCH.json; else catalog=$BASE_URL/releases/$CHANNEL/linux-$ARCH.json; fi
+  fetch "$catalog" "$work/catalog.json" || die "cannot read the release catalog: $catalog"
+  fetch "$catalog.sig" "$work/catalog.json.sig" || die "the release catalog is not signed: $catalog.sig"
+  ssh-keygen -Y verify -f "$ALLOWED_SIGNERS" -I custodia-release -n custodia-release -s "$work/catalog.json.sig" < "$work/catalog.json" >/dev/null 2>&1 || die "the release catalog signature is invalid"
+  field() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" "$work/catalog.json" | head -1; }
+  catalog_version=$(field version)
+  PACKAGE=$(field package)
+  PACKAGE_SHA256=$(field sha256)
+  [ -n "$catalog_version" ] && [ -n "$PACKAGE" ] && [ -n "$PACKAGE_SHA256" ] || die "the release catalog is incomplete"
+  [ -z "$VERSION" ] || [ "$VERSION" = "$catalog_version" ] || die "the catalog names $catalog_version, not $VERSION"
+  VERSION=$catalog_version
+  case "$PACKAGE" in "$BASE_URL"/*) ;; *) die "the catalog points outside $BASE_URL" ;; esac
+  # The console keeps reading the same channel to offer updates.
+  [ -n "$UPDATE_MANIFEST" ] || UPDATE_MANIFEST=$BASE_URL/releases/$CHANNEL/linux-$ARCH.json
+  say "Custodia $VERSION for linux/$ARCH (signed catalog verified)."
+fi
+[ -n "$VERSION" ] || die "--version is required with --package"
+[ -n "$PACKAGE_SHA256" ] || die "--sha256 is required with --package"
+
+# The console address. Without --public-origin, use this host's name when it
+# is fully qualified, else its first address, on the listen port.
+if [ -z "$PUBLIC_ORIGIN" ]; then
+  origin_host=$(hostname -f 2>/dev/null || true)
+  case "$origin_host" in *.*) ;; *) origin_host=$(hostname -I 2>/dev/null | awk '{print $1}') ;; esac
+  [ -n "$origin_host" ] || die "cannot detect this host's name or address; pass --public-origin https://HOST:8443"
+  PUBLIC_ORIGIN=https://$origin_host:${LISTEN##*:}
+  say "Console address: $PUBLIC_ORIGIN (change it with --public-origin)."
+fi
+
 if printf '%s' "$PACKAGE" | grep -Eq '^https?://'; then
   curl -fsSL --proto '=https' --tlsv1.2 "$PACKAGE" -o "$work/package.tar.gz" || die "download failed"
 else
@@ -283,6 +341,6 @@ if [ "$first_admin" = 1 ]; then
   say "  Change it at the first sign-in. It is not logged; this is the only print."
 fi
 if [ "$NO_SYSTEMD" = 1 ]; then
-  say "Run: $PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key"
+  say "Run: $PREFIX/bin/custodia serve --auth-mode local --public-origin $PUBLIC_ORIGIN --dir $DATA_DIR --web-dir $PREFIX/lib/custodia/web --listen $LISTEN --tls-cert $CONFIG_DIR/tls/server.crt --tls-key $CONFIG_DIR/tls/server.key --master-key $CONFIG_DIR/master.key${UPDATE_MANIFEST:+ --update-manifest $UPDATE_MANIFEST}"
 fi
 exit 0

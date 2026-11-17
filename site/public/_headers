@@ -18,3 +18,15 @@
   Cache-Control: public, max-age=31536000, immutable
 /shots/*
   Cache-Control: public, max-age=31536000, immutable
+
+# Instalación: el script, la clave y el catálogo del canal cambian con cada
+# release y se revalidan siempre. Las versiones publicadas quedan con el
+# cacheo por defecto.
+/install.sh
+  Cache-Control: public, max-age=0, must-revalidate
+/install.sh.sig
+  Cache-Control: public, max-age=0, must-revalidate
+/allowed_signers
+  Cache-Control: public, max-age=0, must-revalidate
+/releases/stable/*
+  Cache-Control: public, max-age=0, must-revalidate

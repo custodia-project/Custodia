@@ -15,7 +15,8 @@ const keyIndex = args.indexOf('--signing-key');
 const signingKey = keyIndex >= 0 ? resolve(args[keyIndex + 1]) : null;
 const version = process.env.CUSTODIA_VERSION || '0.0.0-dev';
 const platform = process.platform;
-const architecture = process.arch === 'x64' ? 'amd64' : process.arch;
+// CUSTODIA_ARCH cross-compiles (the binary is pure Go); default: this host.
+const architecture = process.env.CUSTODIA_ARCH || (process.arch === 'x64' ? 'amd64' : process.arch);
 const packageName = `custodia-${version}-${platform}-${architecture}`;
 const stagingRoot = await mkdtemp(join(tmpdir(), 'custodia-package-'));
 const packageDir = join(stagingRoot, packageName);
@@ -41,7 +42,7 @@ try {
   });
   const binary = join(packageDir, platform === 'win32' ? 'custodia.exe' : 'custodia');
   execFileSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version} -X 'main.releasePublicKey=${process.env.CUSTODIA_RELEASE_PUBLIC_KEY || ''}'`, '-o', binary, './cmd/custodia'], {
-    cwd: join(root, 'server'), env: { ...process.env, CGO_ENABLED: '0' }, stdio: 'inherit',
+    cwd: join(root, 'server'), env: { ...process.env, CGO_ENABLED: '0', GOARCH: architecture }, stdio: 'inherit',
   });
   await stat(join(webDir, 'index.html'));
   for (const name of ['README.md', 'README.es.md', 'LICENSE']) {

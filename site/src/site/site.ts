@@ -40,3 +40,31 @@ if (tour && !still && 'IntersectionObserver' in window) {
   }, { rootMargin: '-35% 0px -45% 0px' });
   for (const step of steps) { const copy = step.querySelector('.tour-copy'); if (copy) stage.observe(copy); }
 }
+
+// Botón para copiar cada comando de instalación. Sin el script el bloque
+// sigue ahí para seleccionarlo a mano. Copia el texto tal cual, sin el botón.
+const copyLabel = document.querySelector<HTMLElement>('#install')?.dataset.copy ?? 'Copy';
+const copiedLabel = document.querySelector<HTMLElement>('#install')?.dataset.copied ?? 'Copied';
+if (navigator.clipboard) {
+  for (const block of document.querySelectorAll<HTMLElement>('.install-code')) {
+    const code = block.querySelector('code');
+    if (!code) continue;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'install-copy';
+    button.textContent = copyLabel;
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '');
+        button.textContent = copiedLabel;
+        window.setTimeout(() => { button.textContent = copyLabel; }, 1600);
+      } catch {
+        button.textContent = copyLabel;
+      }
+    });
+    const wrap = document.createElement('div');
+    wrap.className = 'install-code-wrap';
+    block.replaceWith(wrap);
+    wrap.append(block, button);
+  }
+}

@@ -163,6 +163,16 @@ a.button { text-decoration: none; }
 .install-steps p::before { color: var(--ink-900); content: counter(step) ". "; font-family: var(--font-data); font-weight: 700; }
 .install-code { background: var(--ink-100); border: 1px solid var(--ink-300); border-radius: var(--r-md); color: var(--ink-900); font-family: var(--font-data); font-size: var(--t-xs); line-height: 1.7; margin: 0; max-width: 100%; overflow-x: auto; padding: var(--s-3) var(--s-4); white-space: pre; }
 .install-code code { color: inherit; font-size: inherit; }
+.install-code-wrap { position: relative; }
+.install-code-wrap .install-code { padding-right: 76px; }
+.install-copy { background: var(--ink-150); border: 1px solid var(--ink-400); border-radius: var(--r-sm); color: var(--ink-900); cursor: pointer; font-family: var(--font-data); font-size: var(--t-xs); padding: 2px 8px; position: absolute; right: 8px; top: 8px; }
+.install-copy:hover { border-color: var(--ink-700); }
+.install-copy:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.install-code.is-primary { border-color: var(--brand); font-size: var(--t-sm); }
+.install-verify { counter-increment: none; }
+.install-verify p::before { content: none; }
+.install-verify summary { color: var(--ink-900); cursor: pointer; font-size: var(--t-sm); font-weight: 600; margin-bottom: var(--s-2); }
+.install-verify summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .install-code:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .install-side { display: grid; gap: var(--s-5); }
 .install-side h3 { font-size: var(--t-lg); margin-bottom: var(--s-2); }

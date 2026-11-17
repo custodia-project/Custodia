@@ -16,12 +16,14 @@
     "verify:go:wazuh": "node scripts/verify-go-wazuh.mjs",
     "verify:go:install": "node scripts/verify-go-install.mjs",
     "verify:go:update": "node scripts/verify-go-update.mjs",
+    "verify:go:bootstrap": "node scripts/verify-go-bootstrap.mjs",
     "accept:systemd": "sh scripts/accept-systemd-lxd.sh",
     "verify:build:core": "node scripts/verify-build-core.mjs",
     "verify:notices": "node scripts/third-party-notices.mjs --check",
     "verify:go:oidc": "node scripts/verify-go-oidc.mjs",
     "verify:go:gateway": "node scripts/verify-go-gateway.mjs",
     "verify:go:ops": "node scripts/verify-go-ops.mjs",
-    "package:go": "node scripts/package-go.mjs"
+    "package:go": "node scripts/package-go.mjs",
+    "release:site": "node scripts/release-site.mjs"
   }
 }

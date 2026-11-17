@@ -146,7 +146,7 @@
           </ul>
         </section>
 
-        <section class="section" id="install" aria-labelledby="install-title">
+        <section class="section" id="install" aria-labelledby="install-title" data-copy="{{copy}}" data-copied="{{copied}}">
           <p class="section-kicker">{{installKicker}}</p>
           <h2 id="install-title">{{installTitle}}</h2>
           <p class="section-lede">{{installLede}}</p>
@@ -155,11 +155,18 @@
             <ol class="install-steps">
               <li class="reveal">
                 <p>{{installStep1}}</p>
-                <pre class="install-code" tabindex="0"><code>{{installCmdKey}}</code></pre>
+                <pre class="install-code is-primary" tabindex="0"><code>{{installCmd}}</code></pre>
               </li>
               <li class="reveal">
                 <p>{{installStep2}}</p>
-                <pre class="install-code" tabindex="0"><code>{{installCmd}}</code></pre>
+                <pre class="install-code" tabindex="0"><code>{{installOptCmd}}</code></pre>
+              </li>
+              <li class="install-verify reveal">
+                <details>
+                  <summary>{{installVerifyTitle}}</summary>
+                  <p>{{installVerifyText}}</p>
+                  <pre class="install-code" tabindex="0"><code>{{installVerifyCmd}}</code></pre>
+                </details>
               </li>
             </ol>
             <div class="install-side">

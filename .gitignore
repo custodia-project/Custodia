@@ -24,3 +24,8 @@ artifacts/
 DSHub-feat-netskope-dev/
 *.zip
 server.pid
+# Release files written by scripts/release-site.mjs; published, never committed.
+site/public/install.sh
+site/public/install.sh.sig
+site/public/allowed_signers
+site/public/releases/
