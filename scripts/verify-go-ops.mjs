@@ -4,6 +4,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from '
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // Clean disposable host gate for the generated package. No active service,
 // repository database, token or deployment is touched.
@@ -27,12 +28,28 @@ const freePort = async () => {
 
 const start = async (directory, token, port, webDir) => {
   server = spawn(join(webDir, '..', 'custodia'), ['serve-lab', '--dir', directory, '--listen', `127.0.0.1:${port}`, '--web-dir', webDir], { stdio: ['ignore', 'pipe', 'pipe'] });
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Packaged server did not start')), 10000);
-    server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Packaged server exited ${code}`)); });
-    server.stdout.once('data', () => { clearTimeout(timeout); resolve(); });
-  });
-  const page = await fetch(`http://127.0.0.1:${port}/`);
+  const child = server;
+  let spawnError;
+  child.once('error', error => { spawnError = error; });
+  child.stdout.resume();
+  child.stderr.resume();
+  // The startup message can precede the listener. Wait for HTTP readiness,
+  // also after restart/restore, without hiding a failed or exited process.
+  const deadline = Date.now() + 10000;
+  let page;
+  while (Date.now() < deadline) {
+    if (spawnError) throw spawnError;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`Packaged server exited before becoming ready (${child.exitCode ?? child.signalCode})`);
+    }
+    try {
+      page = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1000) });
+      break;
+    } catch {
+      await delay(50);
+    }
+  }
+  if (!page) throw new Error('Packaged server did not become HTTP-ready within 10 seconds');
   if (page.status !== 200 || !(await page.text()).includes('id="root"')) throw new Error('Packaged web entrypoint is missing');
   const response = await fetch(`http://127.0.0.1:${port}/api/auth/status`, { headers: { Authorization: `Bearer ${token}` } });
   if (response.status !== 200) throw new Error(`Packaged auth status returned ${response.status}`);
@@ -41,7 +58,7 @@ const start = async (directory, token, port, webDir) => {
 };
 
 const stop = async () => {
-  if (!server || server.exitCode !== null || server.signalCode !== null) return;
+  if (!server || !server.pid || server.exitCode !== null || server.signalCode !== null) return;
   const exited = new Promise(resolve => server.once('exit', resolve));
   server.kill('SIGTERM');
   await exited;
