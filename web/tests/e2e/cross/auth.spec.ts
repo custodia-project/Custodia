@@ -260,7 +260,7 @@ test('top navigation separates tool selection from workspace selection', async (
   await expect(page.getByRole('button', { name: /Cambiar herramienta. Actual: CyberArk$/ })).toBeVisible();
   await expect(page.getByRole('banner').getByRole('button', { name: /Cambiar workspace/ })).toHaveCount(0);
   await expect(page.getByRole('navigation', { name: 'Secciones de CyberArk', exact: true }).getByRole('link', { name: 'Métricas', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('button', { name: /Cambiar herramienta/ }).locator('.tool-logo img:visible')).toHaveAttribute('src', '/cyberark-logo-white.png');
+  await expect(page.getByRole('button', { name: /Cambiar herramienta/ }).locator('.tool-logo img:visible')).toHaveAttribute('src', '/tools/cyberark.svg');
   await page.getByRole('button', { name: /Cambiar herramienta/ }).click();
 
   const tools = page.getByRole('region', { name: 'Herramientas' });
@@ -276,7 +276,7 @@ test('top navigation separates tool selection from workspace selection', async (
   await trigger.click();
   await tools.getByRole('button', { name: /Netskope/ }).click();
   await expect(trigger).toHaveAttribute('aria-label', 'Cambiar herramienta. Actual: Netskope');
-  await expect(trigger.locator('.tool-logo img:visible')).toHaveAttribute('src', '/netskope-full-white.png');
+  await expect(trigger.locator('.tool-logo img:visible')).toHaveAttribute('src', '/tools/netskope.svg');
   await trigger.click();
   await tools.getByRole('button', { name: /Inicio Resumen general/ }).click();
   await expect(trigger).toHaveAttribute('aria-label', 'Cambiar herramienta. Actual: Inicio');
@@ -1384,7 +1384,7 @@ test('role map compares each role once across areas and opens a cell in its area
   const netskopeTable = map.getByRole('table', { name: 'Netskope: roles y permisos' });
   const compartment = map.locator('details').filter({ has: page.getByRole('table', { name: 'Netskope: roles y permisos', includeHidden: true }) });
   const logo = compartment.locator('summary img:visible');
-  await expect(logo).toHaveAttribute('src', test.info().project.use.colorScheme === 'light' ? '/netskope-full-black.png' : '/netskope-full-white.png');
+  await expect(logo).toHaveAttribute('src', test.info().project.use.colorScheme === 'light' ? '/tools/netskope.svg' : '/tools/netskope.svg');
   await expect.poll(() => logo.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await compartment.locator('summary').click();
   await expect(netskopeTable).toBeHidden();
@@ -1514,7 +1514,7 @@ test('tool compartments group CyberArk areas, keep transversal roles unique, and
   await expect(cyberark).toContainText('Lectura Identity');
   await expect(map.getByRole('table', { name: 'Herramienta de prueba: roles y permisos' })).toContainText('Lectura herramienta de prueba');
   await expect(map.getByRole('button', { name: 'Lectura transversal Personalizado', exact: true })).toHaveCount(1);
-  const expected = test.info().project.use.colorScheme === 'light' ? '/cyberark-logo-dark.png' : '/cyberark-logo-white.png';
+  const expected = test.info().project.use.colorScheme === 'light' ? '/tools/cyberark.svg' : '/tools/cyberark.svg';
   await expect(map.locator('details').filter({ has: page.getByRole('table', { name: 'CyberArk: roles y permisos', includeHidden: true }) }).locator('summary img:visible')).toHaveAttribute('src', expected);
   await cyberark.getByRole('button', { name: 'Lectura Identity Sistema', exact: true }).click();
   const table = page.getByRole('table', { name: 'Permisos por capacidad' });

@@ -3,9 +3,9 @@ import { t } from '../i18n/index.ts';
 
 export type AccessTool = { id: string; name: string; dark?: string; light?: string };
 const hub: AccessTool = { id: 'hub', name: t('Custodia y perfiles transversales') };
-const cyberark: AccessTool = { id: 'cyberark', name: 'CyberArk', dark: '/cyberark-logo-white.png', light: '/cyberark-logo-dark.png' };
-const netskope: AccessTool = { id: 'netskope', name: 'Netskope', dark: '/netskope-full-white.png', light: '/netskope-full-black.png' };
-const bigid: AccessTool = { id: 'bigid', name: 'BigID', dark: '/bigid-full-white.png', light: '/bigid-full-black.png' };
+const cyberark: AccessTool = { id: 'cyberark', name: 'CyberArk', dark: '/tools/cyberark.svg', light: '/tools/cyberark.svg' };
+const netskope: AccessTool = { id: 'netskope', name: 'Netskope', dark: '/tools/netskope.svg', light: '/tools/netskope.svg' };
+const bigid: AccessTool = { id: 'bigid', name: 'BigID', dark: '/tools/bigid.svg', light: '/tools/bigid.svg' };
 
 // Access domains differ from navigation domains. Unknown catalog areas get their own
 // compartment automatically; this registry only supplies known brand metadata.

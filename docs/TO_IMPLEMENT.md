@@ -38,14 +38,23 @@ con métricas ya están implementados en laboratorio (`PROD-AUTH-002`,
 7. `PROD-CLEAN-002`: navegación, README y sitio acotados al MVP. **Hecho; avisos de terceros generados en el paquete.**
 8. `PROD-USE-001`: piloto externo: instalar, conectar, ver métricas y actualizar. **Del dueño.**
 
+**Decisiones del dueño cerradas (17/11):** (1) firma de releases con OpenSSH
+(`ssh-keygen -Y`, namespaces por artefacto), no minisign; clave pública
+embebida en `install.sh` y publicada aparte; clave privada en una llave
+física FIDO2 (`sk-ssh-ed25519`) o, sin ella, Ed25519 con frase de paso fuera
+de la máquina de trabajo; las releases se firman a mano, no en CI. (2) El
+backup no incluye la clave maestra; se guarda aparte una vez. (3) ACME fuera
+del MVP; certificado propio o proxy. (4) Sin logos de fabricantes en el
+paquete, el sitio ni la demo: nombres en texto y monogramas propios. El
+catálogo del canal vence a los 90 días y se renueva a mano con
+`release:site --refresh`.
+
 Estado al 17/11 (commit `0db404b`): lo verificable con código y gates locales
 está hecho, y la instalación, actualización y consola se aceptaron con systemd
 real en LXD (17/11), y el paquete lleva sus avisos de terceros. Para lanzar
 faltan la decisión del dueño sobre marcas y publicación (`PROD-DIST-001`), una clave
 de release real con la primera release publicada (pedido explícito del dueño)
-y el piloto. Decisiones del dueño todavía abiertas: firma OpenSSH frente a
-minisign, backup sin clave maestra y ACME fuera del MVP (las tres con
-recomendación aplicada).
+y el piloto.
 
 **Decisiones del dueño para esta ejecución (16/11; vinculantes salvo que se
 cambien acá):**

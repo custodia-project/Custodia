@@ -419,9 +419,9 @@ test('TOOL-LOGO-001: each context uses its own logo variant, per theme; Custodia
   const loads = async (locator: import('@playwright/test').Locator) => expect.poll(() => locator.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
   // Menu of tools, dark theme: CyberArk and Netskope in lime, BigID (no lime mark) in white.
   const expectedMenu: Record<string, [string, string]> = {
-    'CyberArk': ['/cyberark-logo-lime.png', '/cyberark-logo-dark.png'],
-    'Netskope': ['/netskope-full-lime.png', '/netskope-full-black.png'],
-    'BigID DSPM': ['/bigid-full-white.png', '/bigid-full-black.png'],
+    'CyberArk': ['/tools/cyberark.svg', '/tools/cyberark.svg'],
+    'Netskope': ['/tools/netskope.svg', '/tools/netskope.svg'],
+    'BigID DSPM': ['/tools/bigid.svg', '/tools/bigid.svg'],
   };
   for (const [label, [dark]] of Object.entries(expectedMenu)) {
     const logo = menu.getByRole('button', { name: new RegExp(`^${label} `) }).locator('.tool-logo img:visible');
@@ -442,8 +442,8 @@ test('TOOL-LOGO-001: each context uses its own logo variant, per theme; Custodia
 
   // Header button showing the active tool: white in dark theme (not the menu's lime), dark variant in light theme.
   const headerExpectations: Array<[RegExp, string, string, string]> = [
-    [/^CyberArk /, 'CyberArk', '/cyberark-logo-white.png', '/cyberark-logo-dark.png'],
-    [/^Netskope /, 'Netskope', '/netskope-full-white.png', '/netskope-full-black.png'],
+    [/^CyberArk /, 'CyberArk', '/tools/cyberark.svg', '/tools/cyberark.svg'],
+    [/^Netskope /, 'Netskope', '/tools/netskope.svg', '/tools/netskope.svg'],
   ];
   for (const [menuName, label, white, lightLogo] of headerExpectations) {
     await menu.getByRole('button', { name: menuName }).click();

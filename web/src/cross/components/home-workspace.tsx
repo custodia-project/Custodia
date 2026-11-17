@@ -37,22 +37,22 @@ function GreetingWordmark() {
 
 function CyberArkLogo() {
   return <span className="home-domain-logo" aria-hidden="true">
-    <img className="home-domain-logo-dark" src="/cyberark-logo-dark.png" alt="" />
-    <img className="home-domain-logo-white" src="/cyberark-logo-white.png" alt="" />
+    <img className="home-domain-logo-dark" src="/tools/cyberark.svg" alt="" />
+    <img className="home-domain-logo-white" src="/tools/cyberark.svg" alt="" />
   </span>;
 }
 
 function NetskopeLogo() {
   return <span className="home-domain-logo" aria-hidden="true">
-    <img className="home-domain-logo-dark" src="/netskope-full-black.png" alt="" />
-    <img className="home-domain-logo-white" src="/netskope-full-white.png" alt="" />
+    <img className="home-domain-logo-dark" src="/tools/netskope.svg" alt="" />
+    <img className="home-domain-logo-white" src="/tools/netskope.svg" alt="" />
   </span>;
 }
 
 function BigIdLogo() {
   return <span className="home-domain-logo" aria-hidden="true">
-    <img className="home-domain-logo-dark" src="/bigid-full-black.png" alt="" />
-    <img className="home-domain-logo-white" src="/bigid-full-white.png" alt="" />
+    <img className="home-domain-logo-dark" src="/tools/bigid.svg" alt="" />
+    <img className="home-domain-logo-white" src="/tools/bigid.svg" alt="" />
   </span>;
 }
 

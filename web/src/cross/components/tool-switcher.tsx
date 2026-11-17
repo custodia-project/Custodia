@@ -22,9 +22,9 @@ type ToolMeta = { label: string; detail: string } & ({ icon: LucideIcon; logo?: 
 const TOOL_META: Record<Domain, ToolMeta> = {
   cross: { label: t('Conexiones'), detail: t('Alcance de cada persona en las herramientas'), icon: Waypoints },
   admin: { label: t('Administración'), detail: t('Usuarios, permisos y actividad'), icon: SlidersHorizontal },
-  pam: { label: domainMeta('pam').product.label, detail: domainMeta('pam').product.description, logo: { dark: '/cyberark-logo-lime.png', selectedDark: '/cyberark-logo-white.png', light: '/cyberark-logo-dark.png' } },
-  dlp: { label: domainMeta('dlp').product.label, detail: domainMeta('dlp').product.description, logo: { dark: '/netskope-full-lime.png', selectedDark: '/netskope-full-white.png', light: '/netskope-full-black.png' } },
-  dspm: { label: t('BigID DSPM'), detail: t('Descubrimiento y postura de seguridad de datos'), logo: { dark: '/bigid-full-white.png', light: '/bigid-full-black.png' } },
+  pam: { label: domainMeta('pam').product.label, detail: domainMeta('pam').product.description, logo: { dark: '/tools/cyberark.svg', selectedDark: '/tools/cyberark.svg', light: '/tools/cyberark.svg' } },
+  dlp: { label: domainMeta('dlp').product.label, detail: domainMeta('dlp').product.description, logo: { dark: '/tools/netskope.svg', selectedDark: '/tools/netskope.svg', light: '/tools/netskope.svg' } },
+  dspm: { label: t('BigID DSPM'), detail: t('Descubrimiento y postura de seguridad de datos'), logo: { dark: '/tools/bigid.svg', light: '/tools/bigid.svg' } },
 };
 
 /** The launcher names the platform only; the tool inside it is shown by the workspace switcher next to it. */

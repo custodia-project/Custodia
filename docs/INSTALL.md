@@ -29,7 +29,7 @@ primera IP, en el puerto 8443, con un certificado autofirmado. Deja la consola
 leyendo el mismo canal para ofrecer actualizaciones.
 
 El catálogo del canal declara su canal, su arquitectura y una fecha de
-vencimiento firmada (60 días): el instalador rechaza uno vencido, de otro canal
+vencimiento firmada (90 días): el instalador rechaza uno vencido, de otro canal
 o de otra arquitectura, así que un catálogo firmado viejo no sirve para dejar
 instalaciones nuevas en una release vieja. Un catálogo de versión no declara
 canal y no puede servirse como el último. Si ya hay un Custodia instalado más
@@ -74,6 +74,36 @@ compromiso posterior del sitio no alcanza a servidores ya instalados, y quien
 controle el usuario `custodia` no puede instalar un binario firmado con su
 propia clave.
 
+## Clave de release (decisión del dueño, 17/11)
+
+Las releases se firman a mano con OpenSSH, nunca en CI. La clave privada no
+existe como archivo copiable: se genera en una llave física FIDO2 y firmar
+exige tocarla.
+
+```sh
+# Una vez, con la llave física conectada (YubiKey u otra FIDO2):
+ssh-keygen -t ed25519-sk -O resident -O verify-required \
+  -C custodia-release -f ~/.ssh/custodia-release
+```
+
+`~/.ssh/custodia-release` queda como un manejador que sólo funciona con la
+llave presente; la clave privada vive en la llave. Conviene registrar una
+segunda llave de respaldo (otra clave y otro `allowed_signers` con ambas
+líneas) guardada en otro lugar. Sin llave física, la alternativa es
+`ssh-keygen -t ed25519 -C custodia-release -f RUTA` con frase de paso, guardada
+fuera de la máquina de trabajo y con una copia de respaldo cifrada.
+
+La clave pública (`RUTA.pub`) se versiona en el repositorio como copia para
+comparar, se embebe en `install.sh` y se publica en `/allowed_signers` al
+preparar la release. Perder todas las copias de la clave privada obliga a
+publicar una clave nueva y a reinstalar o actualizar a mano los servidores
+existentes, porque confían sólo en la clave fijada.
+
+**Renovación del canal.** El catálogo del canal vence a los 90 días. Cada 60
+días, aunque no haya release nueva: `npm run release:site -- --signing-key
+RUTA --refresh` y desplegar el sitio. Si vence, las instalaciones nuevas se
+detienen con un mensaje claro y las existentes no se ven afectadas.
+
 ## Publicar una release en el sitio
 
 ```sh
@@ -84,7 +114,7 @@ Escribe en `site/public/` (ignorado por git) `install.sh` con la clave
 embebida y su firma, `allowed_signers`, los paquetes amd64 y arm64 en
 `releases/v<V>/` y los catálogos firmados de esa versión y del canal. No
 publica nada: el despliegue del sitio es un paso aparte y explícito. El
-catálogo del canal vence a los 60 días: `npm run release:site --
+catálogo del canal vence a los 90 días: `npm run release:site --
 --signing-key RUTA/clave --refresh` lo vuelve a firmar con un vencimiento nuevo
 sin recompilar, y hay que hacerlo y desplegar antes de que venza.
 `npm run verify:go:bootstrap` prepara estos archivos con una clave descartable,

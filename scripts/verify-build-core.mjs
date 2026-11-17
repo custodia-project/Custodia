@@ -13,10 +13,12 @@ const names = readdirSync(assets);
 const forbidden = /(netskope|sia[-_]|person|personas|dspm|risk|identity-workspace|connection-inventory)/i;
 const leaked = names.filter((name) => forbidden.test(name));
 if (leaked.length) throw new Error(`production bundle leaked legacy chunks: ${leaked.join(', ')}`);
-// Vendor marks of tools outside the MVP must not ship either.
-const marks = readdirSync(join(web, 'dist')).filter((name) => /^(netskope|bigid)[-_.]/i.test(name));
-if (marks.length) throw new Error(`production build ships non-MVP vendor marks: ${marks.join(', ')}`);
+// Vendor logos are never shipped (owner decision, 17/11): only Custodia's
+// own monograms in tools/. A vendor image file anywhere in the build fails.
+const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(join(dir, entry.name)) : [entry.name]));
+const marks = walk(join(web, 'dist')).filter((name) => /(cyberark|netskope|bigid)[-_.].*\.(png|jpe?g|webp|gif)$/i.test(name));
+if (marks.length) throw new Error(`build ships vendor logo files: ${marks.join(', ')}`);
 let bytes = 0;
 for (const name of names) bytes += statSync(join(assets, name)).size;
 if (!names.some((name) => name.startsWith('index-'))) throw new Error('production bundle has no entry chunk');
-console.log(`Production core bundle: ${names.length} assets, ${(bytes / 1024 / 1024).toFixed(2)} MiB, no Netskope/SIA/Risk/Personas/DSPM chunks or vendor marks.`);
+console.log(`Production core bundle: ${names.length} assets, ${(bytes / 1024 / 1024).toFixed(2)} MiB, no Netskope/SIA/Risk/Personas/DSPM chunks and no vendor logos.`);

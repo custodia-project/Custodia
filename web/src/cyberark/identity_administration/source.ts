@@ -72,5 +72,5 @@ export const registration = {
   ],
   domains: [],
   categories: [],
-  sync: { source: 'identity_administration', meta: { label: t('Identity Administration'), fallback: 'I' }, domain: 'pam', tool: 'cyberark', toolMeta: { label: t('CyberArk'), image: '/cyberark-logo-lime.png', fallback: 'C' }, componentLabel: t('Identity Administration'), quietAutomaticSuccess: true },
+  sync: { source: 'identity_administration', meta: { label: t('Identity Administration'), fallback: 'I' }, domain: 'pam', tool: 'cyberark', toolMeta: { label: t('CyberArk'), image: '/tools/cyberark.svg', fallback: 'C' }, componentLabel: t('Identity Administration'), quietAutomaticSuccess: true },
 } as const satisfies FrontendRegistration;

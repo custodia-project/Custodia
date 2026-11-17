@@ -12,8 +12,8 @@ function sourceMeta(source: string) {
 
 function SourceImage({ source, image }: { source: string; image?: string }) {
   if (source === 'netskope') return <>
-    <img className="sync-toast-logo-dark" src="/netskope-full-lime.png" alt="" />
-    <img className="sync-toast-logo-light" src="/netskope-full-black.png" alt="" />
+    <img className="sync-toast-logo-dark" src="/tools/netskope.svg" alt="" />
+    <img className="sync-toast-logo-light" src="/tools/netskope.svg" alt="" />
   </>;
   return image ? <img src={image} alt="" /> : null;
 }

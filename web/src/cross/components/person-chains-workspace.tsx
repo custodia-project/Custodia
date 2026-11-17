@@ -44,8 +44,8 @@ const PLATFORM_LABELS = PERSON_PLATFORM_LABELS;
 /* CONN-SPACE-001: the platform nodes wear their brand mark: lime on the dark
    theme, the dark mark on the light one (same pairing as the switcher). */
 const PLATFORM_LOGOS: Record<PersonNodeId, { dark: string; light: string }> = {
-  pam: { dark: '/cyberark-logo-lime.png', light: '/cyberark-logo-dark.png' },
-  netskope: { dark: '/netskope-full-lime.png', light: '/netskope-full-black.png' },
+  pam: { dark: '/tools/cyberark.svg', light: '/tools/cyberark.svg' },
+  netskope: { dark: '/tools/netskope.svg', light: '/tools/netskope.svg' },
 };
 
 /* What each platform answers about the person, as the panel eyebrow. */

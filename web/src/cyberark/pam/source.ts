@@ -124,6 +124,6 @@ export const registration = {
   ],
   domains: [],
   categories: [],
-  sync: { source: 'cyberark', meta: { label: t('CyberArk PAM'), image: '/cyberark-logo-lime.png', fallback: 'C' }, domain: 'pam', tool: 'cyberark', toolMeta: { label: t('CyberArk'), image: '/cyberark-logo-lime.png', fallback: 'C' }, componentLabel: 'PAM', componentLabelsByFile: { 'cyberark-psm-api': t('PAM · catálogo PSM') }, sourceHints: ['cyberark', 'pam'], noticeHints: ['cyberark', 'pam', 'safe'], hintOrder: 1 },
+  sync: { source: 'cyberark', meta: { label: t('CyberArk PAM'), image: '/tools/cyberark.svg', fallback: 'C' }, domain: 'pam', tool: 'cyberark', toolMeta: { label: t('CyberArk'), image: '/tools/cyberark.svg', fallback: 'C' }, componentLabel: 'PAM', componentLabelsByFile: { 'cyberark-psm-api': t('PAM · catálogo PSM') }, sourceHints: ['cyberark', 'pam'], noticeHints: ['cyberark', 'pam', 'safe'], hintOrder: 1 },
   manualSync: { domain: 'pam', kind: 'batch', scope: 'cyberark', label: t('Actualizar datos'), detail: t('Sincroniza sólo CyberArk') },
 } as const satisfies FrontendRegistration;

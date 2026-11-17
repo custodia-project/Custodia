@@ -33,7 +33,7 @@ const option = (name, fallback) => {
 const signingKey = option('--signing-key');
 const version = option('--version');
 const refresh = args.includes('--refresh');
-const CATALOG_DAYS = 60;
+const CATALOG_DAYS = 90;
 if (!signingKey || (!version && !refresh)) throw new Error('usage: release-site.mjs --signing-key KEY --version V [--arch amd64,arm64] [--channel stable] [--base-url URL] [--out DIR]');
 if (version && !/^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(version)) throw new Error(`invalid version: ${version}`);
 const architectures = option('--arch', 'amd64,arm64').split(',').filter(Boolean);

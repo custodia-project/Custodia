@@ -30,8 +30,8 @@ type WorkspaceSwitcherProps = {
 // Each logo has a variant per theme (same approach as home-workspace.tsx):
 // the white Netskope mark is invisible on the light surface otherwise.
 const PRODUCT_MARKS: Record<Domain, { label: string; image?: { dark: string; light: string }; fallback: string }> = {
-  pam: { label: domainMeta('pam').product.label, image: { dark: '/cyberark-logo-lime.png', light: '/cyberark-logo-dark.png' }, fallback: 'C' },
-  dlp: { label: domainMeta('dlp').product.label, image: { dark: '/netskope-full-lime.png', light: '/netskope-full-black.png' }, fallback: 'N' },
+  pam: { label: domainMeta('pam').product.label, image: { dark: '/tools/cyberark.svg', light: '/tools/cyberark.svg' }, fallback: 'C' },
+  dlp: { label: domainMeta('dlp').product.label, image: { dark: '/tools/netskope.svg', light: '/tools/netskope.svg' }, fallback: 'N' },
   cross: { label: t('Conexiones'), fallback: 'C' },
   admin: { label: t('Administración'), fallback: 'A' },
   dspm: { label: t('BigID DSPM'), fallback: 'B' },
