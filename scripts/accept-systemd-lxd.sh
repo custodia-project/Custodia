@@ -50,7 +50,7 @@ lxc file push "$WORK/out/custodia-0.1.0-linux-amd64.tar.gz" "$WORK/out/custodia-
 lxc file push "$WORK/out/custodia-0.2.0-linux-amd64/manifest.json.sig" "$NAME/srv/release/custodia-0.2.0.manifest.json.sig" >/dev/null
 in_c 'chmod 0755 /srv/release; chmod 0644 /srv/release/*; chown root:root /root/install/allowed_signers; chmod 0644 /root/install/allowed_signers'
 
-INSTALL="sh /root/install/install.sh --signature unused --allowed-signers /root/install/allowed_signers --public-origin $ORIGIN --update-manifest /srv/release/release.json"
+INSTALL="sh /root/install/install.sh --yes --signature unused --allowed-signers /root/install/allowed_signers --public-origin $ORIGIN --update-manifest /srv/release/release.json"
 
 echo "1. install N-1 as root with systemd"
 in_c "$INSTALL --version 0.1.0 --package /srv/release/custodia-0.1.0-linux-amd64.tar.gz --sha256 $SHA1 > /root/install.log 2>&1" || fail "installer exited non-zero"

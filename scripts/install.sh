@@ -32,6 +32,8 @@ ALLOWED_SIGNERS=
 UPDATE_MANIFEST=
 NO_SYSTEMD=0
 UNINSTALL=0
+ALLOW_DOWNGRADE=0
+ASSUME_YES=0
 PURGE=0
 VERSION=
 ARCH=amd64
@@ -60,10 +62,12 @@ while [ $# -gt 0 ]; do
     --channel) CHANNEL=$2; shift 2 ;;
     --no-systemd) NO_SYSTEMD=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
+    -y|--yes) ASSUME_YES=1; shift ;;
     --purge) PURGE=1; shift ;;
     -h|--help)
       say "usage: install.sh [--public-origin URL] [--version V] [--tls-cert FILE --tls-key FILE]"
-      say "                    [--channel stable] [--base-url URL] [--allowed-signers FILE]"
+      say "                    [--channel stable] [--base-url URL] [--allowed-signers FILE] [--allow-downgrade] [--yes]"
       say "                    [--package FILE|URL --sha256 HEX --version V]   (explicit package)"
       say "                    [--prefix DIR] [--data-dir DIR] [--config-dir DIR] [--user USER]"
       say "                    [--listen HOST:PORT] [--public-origin URL] [--tls-cert FILE --tls-key FILE]"
@@ -125,8 +129,18 @@ if [ -z "$PACKAGE" ]; then
   if [ -n "$VERSION" ]; then catalog=$BASE_URL/releases/v$VERSION/linux-$ARCH.json; else catalog=$BASE_URL/releases/$CHANNEL/linux-$ARCH.json; fi
   fetch "$catalog" "$work/catalog.json" || die "cannot read the release catalog: $catalog"
   fetch "$catalog.sig" "$work/catalog.json.sig" || die "the release catalog is not signed: $catalog.sig"
-  ssh-keygen -Y verify -f "$ALLOWED_SIGNERS" -I custodia-release -n custodia-release -s "$work/catalog.json.sig" < "$work/catalog.json" >/dev/null 2>&1 || die "the release catalog signature is invalid"
+  ssh-keygen -Y verify -f "$ALLOWED_SIGNERS" -I custodia-release -n custodia-catalog -s "$work/catalog.json.sig" < "$work/catalog.json" >/dev/null 2>&1 || die "the release catalog signature is invalid"
   field() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" "$work/catalog.json" | head -1; }
+  [ "$(field architecture)" = "$ARCH" ] || die "the release catalog is for another architecture"
+  # A channel catalog must name this channel and still be valid, so an old
+  # signed catalog cannot be replayed to hold installs on an old release.
+  # A version catalog names no channel and cannot stand in for one.
+  if [ -z "$VERSION" ]; then
+    [ "$(field channel)" = "$CHANNEL" ] || die "the release catalog is not for the $CHANNEL channel"
+    expires=$(field expires_at)
+    expires_epoch=$(date -u -d "$expires" +%s 2>/dev/null || echo 0)
+    [ "$expires_epoch" -gt "$(date -u +%s)" ] || die "the release catalog expired ($expires); the site must re-sign it"
+  fi
   catalog_version=$(field version)
   PACKAGE=$(field package)
   PACKAGE_SHA256=$(field sha256)
@@ -141,13 +155,67 @@ fi
 [ -n "$VERSION" ] || die "--version is required with --package"
 [ -n "$PACKAGE_SHA256" ] || die "--sha256 is required with --package"
 
-# The console address. Without --public-origin, use this host's name when it
-# is fully qualified, else its first address, on the listen port.
+# Never replace an installed release with an older one by accident.
+if [ -x "$PREFIX/bin/custodia" ] && [ "$ALLOW_DOWNGRADE" = 0 ]; then
+  installed_version=$("$PREFIX/bin/custodia" version 2>/dev/null || true)
+  if [ -n "$installed_version" ] && [ "$installed_version" != "$VERSION" ]; then
+    newest=$(printf '%s\n%s\n' "$installed_version" "$VERSION" | sort -V | tail -1)
+    [ "$newest" = "$VERSION" ] || die "Custodia $installed_version is installed; refusing to install the older $VERSION (use --allow-downgrade to force)"
+  fi
+fi
+
+# Questions with ready answers. Piped through curl | sudo sh, stdin is the
+# script itself, so answers are read from the terminal. Without a terminal
+# (automation) or with --yes, the defaults apply and nothing is asked. A flag
+# given on the command line skips its question.
+INTERACTIVE=0
+if [ "$ASSUME_YES" = 0 ] && [ "$UNINSTALL" = 0 ] && (: < /dev/tty) 2>/dev/null; then INTERACTIVE=1; fi
+ask() { # ask "Question" "default" -> answer on stdout
+  printf '%s [%s]: ' "$1" "$2" > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=
+  [ -n "$answer" ] && printf '%s' "$answer" || printf '%s' "$2"
+}
+
+# The console address. Default: this host's name when it is fully qualified,
+# else its first address, on the listen port.
 if [ -z "$PUBLIC_ORIGIN" ]; then
   origin_host=$(hostname -f 2>/dev/null || true)
   case "$origin_host" in *.*) ;; *) origin_host=$(hostname -I 2>/dev/null | awk '{print $1}') ;; esac
-  [ -n "$origin_host" ] || die "cannot detect this host's name or address; pass --public-origin https://HOST:8443"
-  PUBLIC_ORIGIN=https://$origin_host:${LISTEN##*:}
+  default_origin=
+  [ -z "$origin_host" ] || default_origin=https://$origin_host:${LISTEN##*:}
+  if [ "$INTERACTIVE" = 1 ]; then
+    PUBLIC_ORIGIN=$(ask "Console address (how people will open Custodia)" "${default_origin:-https://HOST:8443}")
+  else
+    PUBLIC_ORIGIN=$default_origin
+  fi
+  case "$PUBLIC_ORIGIN" in https://HOST:*|"") die "cannot detect this host's name or address; pass --public-origin https://HOST:8443" ;; esac
+fi
+case "$PUBLIC_ORIGIN" in https://*) ;; *) die "the console address must start with https://" ;; esac
+
+# TLS: a certificate of your own, or a self-signed one for the address above.
+if [ -z "$TLS_CERT" ] && [ "$INTERACTIVE" = 1 ]; then
+  tls_choice=$(ask "TLS certificate: 1) self-signed  2) my own certificate files" "1")
+  if [ "$tls_choice" = 2 ]; then
+    TLS_CERT=$(ask "Certificate file (PEM)" "/etc/ssl/certs/custodia.pem")
+    TLS_KEY=$(ask "Private key file (PEM)" "/etc/ssl/private/custodia.key")
+  fi
+fi
+if [ -n "$TLS_CERT" ] || [ -n "$TLS_KEY" ]; then
+  [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ] || die "both --tls-cert and --tls-key must be existing files"
+fi
+
+if [ "$INTERACTIVE" = 1 ]; then
+  {
+    say ""
+    say "Custodia $VERSION will be installed:"
+    say "  console:     $PUBLIC_ORIGIN"
+    if [ -n "$TLS_CERT" ]; then say "  certificate: $TLS_CERT"; else say "  certificate: self-signed for this address"; fi
+    say "  binary:      $PREFIX/bin/custodia"
+    say "  data:        $DATA_DIR"
+    if [ "$NO_SYSTEMD" = 0 ]; then say "  service:     custodia.service (systemd)"; fi
+  } > /dev/tty
+  case "$(ask "Continue?" "Y/n")" in [Nn]*) die "cancelled; nothing was changed" ;; esac
+else
   say "Console address: $PUBLIC_ORIGIN (change it with --public-origin)."
 fi
 

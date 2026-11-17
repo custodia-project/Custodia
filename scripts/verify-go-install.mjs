@@ -114,7 +114,28 @@ try {
   try { process.kill(-server.pid, 'SIGTERM'); } catch {}
   const uninstalled = run('sh', [join(root, 'scripts/install.sh'), '--no-systemd', '--prefix', prefix, '--data-dir', data, '--config-dir', config, '--uninstall']);
   if (!uninstalled.includes('preserved')) throw new Error('uninstall did not preserve data');
-  console.log(`Installer: signed local release, local install, TLS health, one-time admin, wrong-key, tampered-binary and unlisted-file rejection and uninstall OK (version ${version}).`);
+  // Interactive: piped like curl | sh, answers come from the terminal. A fake
+  // terminal (script(1)) answers; "n" cancels before any change, and a
+  // custom address is used as given.
+  const without = (args, flags) => args.filter((value, index) => !flags.includes(value) && !flags.includes(args[index - 1]));
+  const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const interactive = (answers, name, extra = []) => {
+    const args = [...without(installArgs, ['--prefix', '--public-origin', '--data-dir', '--config-dir']), '--prefix', join(temporary, name, 'p'), '--data-dir', join(temporary, name, 'd'), '--config-dir', join(temporary, name, 'c'), ...extra];
+    const command = `cat ${quote(join(root, 'scripts/install.sh'))} | sh -s -- ${args.map(quote).join(' ')}`;
+    return execFileSync('script', ['-qec', command, '/dev/null'], { input: answers, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  };
+  let cancelled = '';
+  try { interactive('\n1\nn\n', 'cancel'); } catch (error) { cancelled = String(error.stdout ?? '') + String(error.stderr ?? ''); }
+  if (!cancelled.includes('cancelled; nothing was changed')) throw new Error(`interactive cancel did not stop: ${cancelled}`);
+  try { await readFile(join(temporary, 'cancel', 'p', 'bin', 'custodia')); throw new Error('cancelled install wrote a binary'); } catch (error) { if (error.message === 'cancelled install wrote a binary') throw error; }
+  const custom = interactive('https://custodia.globex.example:8443\n1\n\n', 'custom');
+  if (!custom.includes('URL:    https://custodia.globex.example:8443')) throw new Error(`interactive address was not used: ${custom}`);
+  const subject = run('openssl', ['x509', '-in', join(temporary, 'custom', 'c', 'tls', 'server.crt'), '-noout', '-ext', 'subjectAltName']);
+  if (!subject.includes('custodia.globex.example')) throw new Error(`self-signed certificate does not name the chosen address: ${subject}`);
+  const unattended = run('sh', ['-c', `cat ${quote(join(root, 'scripts/install.sh'))} | sh -s -- ${[...without(installArgs, ['--prefix', '--data-dir', '--config-dir']), '--prefix', join(temporary, 'yes', 'p'), '--data-dir', join(temporary, 'yes', 'd'), '--config-dir', join(temporary, 'yes', 'c'), '--yes'].map(quote).join(' ')}`]);
+  if (!unattended.includes('installed.')) throw new Error('--yes install failed');
+
+  console.log(`Installer: signed local release, local install, TLS health, one-time admin, wrong-key, tampered-binary and unlisted-file rejection, interactive questions (cancel, custom address), --yes and uninstall OK (version ${version}).`);
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

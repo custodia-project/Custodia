@@ -51,7 +51,7 @@
         </nav>
       </header>
 
-      <main id="content">
+      <main id="content" data-copy="{{copy}}" data-copied="{{copied}}">
         <section class="hero" aria-labelledby="hero-title">
           <div class="hero-copy">
             <p class="eyebrow">{{eyebrow}}</p>
@@ -59,9 +59,14 @@
             <p class="hero-lede">{{lede}}</p>
             <div class="hero-actions">
               <a href="{{demo}}/{{demoLang}}" class="button is-primary">{{ctaDemo}} <span aria-hidden="true">→</span></a>
-              <a href="#use" class="button">{{ctaHow}}</a>
+              <a href="#install" class="button">{{ctaInstall}}</a>
             </div>
             <p class="hero-note">{{heroNote}}</p>
+            <div class="hero-install">
+              <p class="hero-install-label">{{heroInstallLabel}}</p>
+              <pre class="install-code is-primary" tabindex="0"><code>{{installCmd}}</code></pre>
+              <p class="hero-install-note">{{heroInstallNote}}</p>
+            </div>
           </div>
           <!-- Cloudflare ofusca correos en el HTML; los de la demo son ficticios y deben verse. -->
           <figure class="shot hero-shot"><a href="{{demo}}/chains/person{{demoLang}}"><span class="frame-bar" aria-hidden="true"><i></i><i></i><i></i><span class="frame-url">custodia-demo.pages.dev/chains/person</span></span><picture><source srcset="/shots/{{lang}}/person.webp?v={{shotVersion}}" type="image/webp" /><img src="/shots/{{lang}}/person.png?v={{shotVersion}}" alt="{{heroAlt}}" width="1440" height="760" /></picture></a><figcaption>{{heroCaption}}<br /><a class="shot-expand" href="/shots/{{lang}}/person.png?v={{shotVersion}}" target="_blank" rel="noopener">{{expandShot}} <span aria-hidden="true">↗</span></a></figcaption></figure>
@@ -146,7 +151,7 @@
           </ul>
         </section>
 
-        <section class="section" id="install" aria-labelledby="install-title" data-copy="{{copy}}" data-copied="{{copied}}">
+        <section class="section" id="install" aria-labelledby="install-title">
           <p class="section-kicker">{{installKicker}}</p>
           <h2 id="install-title">{{installTitle}}</h2>
           <p class="section-lede">{{installLede}}</p>
@@ -159,7 +164,7 @@
               </li>
               <li class="reveal">
                 <p>{{installStep2}}</p>
-                <pre class="install-code" tabindex="0"><code>{{installOptCmd}}</code></pre>
+                <pre class="install-preview" tabindex="0" aria-label="{{installPreviewLabel}}"><code>{{installPreview}}</code></pre>
               </li>
               <li class="install-verify reveal">
                 <details>

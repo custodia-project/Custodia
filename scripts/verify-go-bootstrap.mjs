@@ -18,7 +18,8 @@ const site = join(temporary, 'site');
 const key = join(temporary, 'release-key');
 const cert = join(temporary, 'tls.crt');
 const tlsKey = join(temporary, 'tls.key');
-const version = '0.1.0';
+const older = '0.1.0';
+const version = '0.2.0';
 const arch = process.arch === 'x64' ? 'amd64' : process.arch;
 let server;
 
@@ -32,7 +33,10 @@ try {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1', '-keyout', tlsKey, '-out', cert], { stdio: 'pipe' });
   const port = await freePort();
   const base = `https://127.0.0.1:${port}`;
-  execFileSync('node', [join(root, 'scripts', 'release-site.mjs'), '--signing-key', key, '--version', version, '--arch', arch, '--base-url', base, '--out', site], { cwd: root, stdio: 'pipe' });
+  // Two releases: the channel ends on the newer one.
+  for (const release of [older, version]) {
+    execFileSync('node', [join(root, 'scripts', 'release-site.mjs'), '--signing-key', key, '--version', release, '--arch', arch, '--base-url', base, '--out', site], { cwd: root, stdio: 'pipe' });
+  }
 
   const types = { '.sh': 'text/x-shellscript', '.json': 'application/json', '.gz': 'application/gzip' };
   server = createServer({ key: await readFile(tlsKey), cert: await readFile(cert) }, async (request, response) => {
@@ -72,22 +76,43 @@ try {
   const pinned = (await readFile(join(temporary, 'ok', 'p', 'lib', 'custodia', 'allowed_signers'), 'utf8')).trim();
   const published = (await readFile(join(site, 'allowed_signers'), 'utf8')).trim();
   if (pinned !== published) throw new Error('the pinned release key differs from the published one');
-  const scriptSignature = spawnSync('ssh-keygen', ['-Y', 'verify', '-f', join(site, 'allowed_signers'), '-I', 'custodia-release', '-n', 'custodia-release', '-s', join(site, 'install.sh.sig')], { input: await readFile(join(site, 'install.sh')) });
+  const scriptSignature = spawnSync('ssh-keygen', ['-Y', 'verify', '-f', join(site, 'allowed_signers'), '-I', 'custodia-release', '-n', 'custodia-installer', '-s', join(site, 'install.sh.sig')], { input: await readFile(join(site, 'install.sh')) });
   if (scriptSignature.status !== 0) throw new Error('published install.sh signature does not verify');
 
   const refuse = (result, reason, label) => {
     if (result.status === 0) throw new Error(`${label} was accepted`);
     if (!result.stderr.includes(reason)) throw new Error(`${label} failed for another reason (wanted "${reason}"): ${result.stderr}`);
   };
-  // A catalog edited after signing.
+  // The installed release is never replaced by an older one by accident.
+  refuse(await oneLiner(`${prefixArgs('ok')} --version ${older}`), `refusing to install the older ${older}`, 'a downgrade');
+  const forced = await oneLiner(`${prefixArgs('ok')} --version ${older} --allow-downgrade`);
+  if (forced.status !== 0 || !forced.stdout.includes(`Custodia ${older} installed.`)) throw new Error(`an explicit downgrade failed: ${forced.stderr}`);
+
   const catalog = join(site, 'releases', 'stable', `linux-${arch}.json`);
   const original = await readFile(catalog, 'utf8');
+  const originalSignature = await readFile(`${catalog}.sig`);
+  const resign = async (content, namespace = 'custodia-catalog') => {
+    await writeFile(catalog, content);
+    await rm(`${catalog}.sig`, { force: true });
+    execFileSync('ssh-keygen', ['-Y', 'sign', '-f', key, '-n', namespace, catalog], { stdio: 'pipe' });
+  };
+  // A channel catalog that expired: an old signed catalog replayed later.
+  await resign(original.replace(/"expires_at": "[^"]+"/, '"expires_at": "2020-01-01T00:00:00Z"'));
+  refuse(await oneLiner(prefixArgs('expired')), 'the release catalog expired', 'an expired channel catalog');
+  // A version catalog (old release, no channel) served as the channel.
+  await writeFile(catalog, await readFile(join(site, 'releases', `v${older}`, `linux-${arch}.json`)));
+  await writeFile(`${catalog}.sig`, await readFile(join(site, 'releases', `v${older}`, `linux-${arch}.json.sig`)));
+  refuse(await oneLiner(prefixArgs('pinned-old')), 'is not for the stable channel', 'a version catalog served as the channel');
+  // The right content signed in another artifact namespace.
+  await resign(original, 'custodia-release');
+  refuse(await oneLiner(prefixArgs('namespace')), 'the release catalog signature is invalid', 'a catalog signed in another namespace');
+  await writeFile(catalog, original);
+  await writeFile(`${catalog}.sig`, originalSignature);
+  // A catalog edited after signing.
   await writeFile(catalog, original.replace(/"sha256": "[0-9a-f]+"/, `"sha256": "${'0'.repeat(64)}"`));
   refuse(await oneLiner(prefixArgs('tampered')), 'the release catalog signature is invalid', 'a tampered catalog');
   // A correctly signed catalog that points outside the site.
-  await writeFile(catalog, original.replace(`${base}/releases`, 'https://downloads.globex.example/releases'));
-  await rm(`${catalog}.sig`);
-  execFileSync('ssh-keygen', ['-Y', 'sign', '-f', key, '-n', 'custodia-release', catalog], { stdio: 'pipe' });
+  await resign(original.replace(`${base}/releases`, 'https://downloads.globex.example/releases'));
   refuse(await oneLiner(prefixArgs('elsewhere')), 'the catalog points outside', 'a catalog pointing elsewhere');
   // The repository copy has no key and must not install anything.
   await writeFile(join(site, 'unsigned-install.sh'), await readFile(join(root, 'scripts', 'install.sh')));
@@ -95,7 +120,15 @@ try {
   // An unknown version has no catalog.
   refuse(await oneLiner(`${prefixArgs('missing')} --version 9.9.9`), 'cannot read the release catalog', 'an unknown version');
 
-  console.log(`Bootstrap: curl | sh from a signed catalog installed ${version} (linux/${arch}), pinned the published key, set the console update channel; tampered, redirected, keyless and unknown-version installs refused.`);
+  // --refresh re-signs the channel with a new expiry and installs keep working.
+  await resign(original.replace(/"expires_at": "[^"]+"/, '"expires_at": "2020-01-01T00:00:00Z"'));
+  execFileSync('node', [join(root, 'scripts', 'release-site.mjs'), '--signing-key', key, '--refresh', '--out', site], { cwd: root, stdio: 'pipe' });
+  const refreshed = JSON.parse(await readFile(catalog, 'utf8'));
+  if (!(Date.parse(refreshed.expires_at) > Date.now()) || refreshed.version !== version || refreshed.channel !== 'stable') throw new Error(`refresh produced ${JSON.stringify(refreshed)}`);
+  const afterRefresh = await oneLiner(prefixArgs('refreshed'));
+  if (afterRefresh.status !== 0 || !afterRefresh.stdout.includes(`Custodia ${version} installed.`)) throw new Error(`install after refresh failed: ${afterRefresh.stderr}`);
+
+  console.log(`Bootstrap: curl | sh from a signed catalog installed ${version} (linux/${arch}), pinned the published key, set the console update channel; downgrade refused unless explicit; --refresh renews the channel; expired, replayed-version, wrong-namespace, tampered, redirected, keyless and unknown-version catalogs refused.`);
 } finally {
   server?.close();
   await rm(temporary, { recursive: true, force: true });

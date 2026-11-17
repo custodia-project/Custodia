@@ -25,6 +25,24 @@ dirección de la consola usa el nombre completo del host o, si no tiene, su
 primera IP, en el puerto 8443, con un certificado autofirmado. Deja la consola
 leyendo el mismo canal para ofrecer actualizaciones.
 
+El catálogo del canal declara su canal, su arquitectura y una fecha de
+vencimiento firmada (60 días): el instalador rechaza uno vencido, de otro canal
+o de otra arquitectura, así que un catálogo firmado viejo no sirve para dejar
+instalaciones nuevas en una release vieja. Un catálogo de versión no declara
+canal y no puede servirse como el último. Si ya hay un Custodia instalado más
+nuevo, el instalador se niega a reemplazarlo salvo con `--allow-downgrade`.
+Cada tipo de artefacto se firma en su propio namespace de OpenSSH
+(`custodia-installer`, `custodia-catalog`, `custodia-release` para el manifiesto
+del paquete), así que una firma de un tipo no vale para otro.
+
+En una terminal, el instalador hace dos preguntas con la respuesta ya
+completa (Enter la acepta): la dirección de la consola y si usar un certificado
+autofirmado o archivos propios. Después muestra un resumen y pide confirmación;
+nada cambia hasta confirmar. Como `curl | sudo sh` usa la entrada estándar para
+el script, las respuestas se leen de `/dev/tty`. Sin terminal (automatización)
+o con `--yes`, usa los valores por defecto sin preguntar, y cada flag dado salta
+su pregunta.
+
 Opciones habituales, después de `sudo sh -s --`: `--public-origin URL`,
 `--tls-cert FILE --tls-key FILE`, `--version V` (lee el catálogo firmado de esa
 versión) y `--channel NOMBRE`. El modo explícito sigue disponible para hosts sin
@@ -62,11 +80,15 @@ npm run release:site -- --signing-key RUTA/clave --version 0.1.0
 Escribe en `site/public/` (ignorado por git) `install.sh` con la clave
 embebida y su firma, `allowed_signers`, los paquetes amd64 y arm64 en
 `releases/v<V>/` y los catálogos firmados de esa versión y del canal. No
-publica nada: el despliegue del sitio es un paso aparte y explícito.
+publica nada: el despliegue del sitio es un paso aparte y explícito. El
+catálogo del canal vence a los 60 días: `npm run release:site --
+--signing-key RUTA/clave --refresh` lo vuelve a firmar con un vencimiento nuevo
+sin recompilar, y hay que hacerlo y desplegar antes de que venza.
 `npm run verify:go:bootstrap` prepara estos archivos con una clave descartable,
-los sirve por HTTPS local y ejecuta el comando real; rechaza un catálogo
-alterado, uno que apunte fuera del sitio, un script sin clave y una versión
-inexistente.
+los sirve por HTTPS local y ejecuta el comando real; rechaza una vuelta atrás
+no explícita y un catálogo vencido, de versión servido como canal, firmado en
+otro namespace, alterado o que apunte fuera del sitio, además de un script sin
+clave y una versión inexistente.
 
 La firma cubre sólo `manifest.json`, por eso el manifiesto firmado manda sobre
 cada archivo: instalador y actualizador comprueban que cada archivo extraído

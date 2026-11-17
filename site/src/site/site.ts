@@ -43,8 +43,9 @@ if (tour && !still && 'IntersectionObserver' in window) {
 
 // Botón para copiar cada comando de instalación. Sin el script el bloque
 // sigue ahí para seleccionarlo a mano. Copia el texto tal cual, sin el botón.
-const copyLabel = document.querySelector<HTMLElement>('#install')?.dataset.copy ?? 'Copy';
-const copiedLabel = document.querySelector<HTMLElement>('#install')?.dataset.copied ?? 'Copied';
+const labels = document.querySelector<HTMLElement>('[data-copy]')?.dataset;
+const copyLabel = labels?.copy ?? 'Copy';
+const copiedLabel = labels?.copied ?? 'Copied';
 if (navigator.clipboard) {
   for (const block of document.querySelectorAll<HTMLElement>('.install-code')) {
     const code = block.querySelector('code');
