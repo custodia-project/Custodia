@@ -115,6 +115,12 @@ in_c 'for i in $(seq 1 30); do sleep 2; [ -e /var/lib/custodia/.update/request.j
 in_c 'journalctl -u custodia-update.service --no-pager | grep -q "release signature rejected"' || fail "forged update not rejected by its signature"
 in_c 'test "$(/usr/local/bin/custodia version)" = 0.2.0 && test ! -e /tmp/pwned && test ! -e /var/lib/custodia/.update/request.json' || fail "forged update changed the host or looped"
 
+echo "4b. a request naming a root-only file is read with the service user's rights"
+in_c "runuser -u custodia -- sh -c 'printf \"{\\\"manifest\\\":{\\\"version\\\":\\\"0.9.1\\\",\\\"package\\\":\\\"/etc/shadow\\\",\\\"sha256\\\":\\\"00\\\",\\\"signature\\\":\\\"/etc/shadow\\\"}}\" > /var/lib/custodia/.update/request.json'"
+in_c 'for i in $(seq 1 30); do sleep 2; [ -e /var/lib/custodia/.update/request.json ] || systemctl is-active -q custodia-update.service || break; done; sleep 2'
+in_c 'journalctl -u custodia-update.service --no-pager | grep -q "update request file: .*Permission denied"' || fail "root opened a file chosen by the service user"
+in_c 'test "$(/usr/local/bin/custodia version)" = 0.2.0' || fail "root-only request changed the host"
+
 echo "5. backup timer service"
 in_c 'systemctl start custodia-backup.service && test "$(systemctl show custodia-backup.service -p Result --value)" = success' || fail "backup timer service"
 in_c 'ls /var/lib/custodia/backups | grep -Eq "^custodia-[0-9]{8}-[0-9]{6}\.db$"' || fail "backup file name"

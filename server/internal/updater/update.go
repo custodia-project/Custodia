@@ -200,6 +200,42 @@ func dataOwner(dataDir string) (*syscall.Credential, error) {
 	return &syscall.Credential{Uid: stat.Uid, Gid: stat.Gid, Groups: []uint32{stat.Gid}}, nil
 }
 
+// readAs copies a file named by an untrusted request into target, opening it
+// as owner when set. The copy is bounded in size and time.
+func readAs(ctx context.Context, owner *syscall.Credential, location, target string) error {
+	const limit = 1 << 30
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, "cat", "--", location)
+	if owner != nil {
+		command.SysProcAttr = &syscall.SysProcAttr{Credential: owner}
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	if err = command.Start(); err != nil {
+		return err
+	}
+	copied, copyErr := io.Copy(output, io.LimitReader(stdout, limit+1))
+	if copied > limit {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return errors.New("file is larger than the update limit")
+	}
+	if err = command.Wait(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return copyErr
+}
+
 // runAs runs a command, as owner when it is set, and reports its output on
 // failure.
 func runAs(ctx context.Context, owner *syscall.Credential, name string, args ...string) error {
@@ -561,30 +597,19 @@ func ApplyRequest(ctx context.Context, requestPath string, options Options) erro
 	defer os.RemoveAll(directory)
 	materialize := func(location, name string) (string, error) {
 		if !strings.HasPrefix(location, "https://") {
-			// A local path chosen by the service user is opened once without
-			// following links, checked to be a regular file on that same
-			// descriptor and copied into the private directory; every later
-			// step uses only the copy.
-			source, err := os.OpenFile(location, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-			if err != nil {
-				return "", fmt.Errorf("update request file: %w", err)
-			}
-			defer source.Close()
-			info, err := source.Stat()
+			// A local path is chosen by the service user, so root never opens
+			// it: a child process with the data directory owner's credentials
+			// reads it (following only what that user could follow) and root
+			// receives the bytes into its private directory. A device or a
+			// FIFO cannot exceed the size limit or the deadline. Every later
+			// step uses only the copy, verified against the signed manifest.
+			owner, err := dataOwner(options.DataDir)
 			if err != nil {
 				return "", err
-			}
-			if !info.Mode().IsRegular() {
-				return "", errors.New("update request names a non-regular local file")
 			}
 			target := filepath.Join(directory, name)
-			output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-			if err != nil {
-				return "", err
-			}
-			defer output.Close()
-			if _, err = io.Copy(output, io.LimitReader(source, 1<<30)); err != nil {
-				return "", err
+			if err := readAs(ctx, owner, location, target); err != nil {
+				return "", fmt.Errorf("update request file: %w", err)
 			}
 			return target, nil
 		}
